@@ -7,7 +7,9 @@ from ..services.catalog import search_products
 from ..services.recommendation import recommend_cross_sell
 from ..trust.policy import check_policy
 from ..core.events import publish
-from .groq_client import get_groq_client, SYSTEM_PROMPT, TOOLS_SCHEMA
+from .groq_client import get_groq_client
+from ..core.tracing import start_trace, start_span, end_span, get_trace_id
+from .groq_client import SYSTEM_PROMPT, TOOLS_SCHEMA
 
 # Map tool names to executors with Trust gateway P0-12 exact binding
 def tool_gateway(db: Session, merchant_id: str, tool: str, args: dict, run_id: str = None):
@@ -128,7 +130,9 @@ def run_agent(db: Session, merchant_id: str, customer_id: str, user_message: str
     tool_calls_log=[]
     max_steps=6
     for step in range(max_steps):
+        llm_span=start_span("llm.call", attrs={"model": model or "openai/gpt-oss-20b"})
         resp=client.chat.completions.create(model=model or "openai/gpt-oss-20b", messages=messages, tools=TOOLS_SCHEMA, tool_choice="auto", temperature=0.2, max_tokens=800)
+        end_span(llm_span, status="ok", attrs={"has_tool_calls": bool(resp.choices[0].message.tool_calls)})
         msg=resp.choices[0].message
         # store assistant message
         db.add(AgentMessage(run_id=run.id, session_id=sess.id, role="assistant", content=msg.content or "")); db.commit()
@@ -141,7 +145,9 @@ def run_agent(db: Session, merchant_id: str, customer_id: str, user_message: str
             fname=tc.function.name
             try: args=json.loads(tc.function.arguments or "{}")
             except: args={}
+            tspan=start_span(f"tool:{fname}", attrs={"tool": fname})
             result=tool_gateway(db, merchant_id, fname, args, run.id)
+            end_span(tspan, status="error" if result.get("error") else "ok")
             # record tool call
             tcr=AgentToolCall(run_id=run.id, session_id=sess.id, tool=fname, input=args, output=result, policy_result=str(result.get("policy",{}).get("decision","")), risk_score=result.get("policy",{}).get("risk"))
             db.add(tcr); db.commit()

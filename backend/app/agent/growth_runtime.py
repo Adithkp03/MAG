@@ -6,6 +6,7 @@ from sqlalchemy import text
 from ..models.entities import Product, AgentSession, AgentRun, AgentMessage, AgentToolCall, AuditEvent
 from ..services.growth_intelligence import compute_product_metrics, compute_customer_metrics, rank_candidates
 from .groq_client import get_groq_client
+from ..core.tracing import start_span, end_span
 
 GROWTH_SYSTEM = """You are Growth Agent for Merchant Autonomous Growth. Find evidence-based opportunities.
 
@@ -90,7 +91,9 @@ def run_growth_agent(db: Session, merchant_id: str="m_demo", user_message: str="
     messages=[{"role":"system","content": GROWTH_SYSTEM}, {"role":"user","content": user_message}]
     tool_log=[]
     for _ in range(6):
+        llm_span=start_span("llm.call", attrs={"agent":"growth"})
         resp=client.chat.completions.create(model="openai/gpt-oss-20b", messages=messages, tools=GROWTH_TOOLS, tool_choice="auto", temperature=0.2, max_tokens=900)
+        end_span(llm_span, status="ok")
         msg=resp.choices[0].message
         db.add(AgentMessage(run_id=run.id, session_id=sess.id, role="assistant", content=msg.content or "")); db.commit()
         if not msg.tool_calls:
@@ -100,7 +103,9 @@ def run_growth_agent(db: Session, merchant_id: str="m_demo", user_message: str="
             fname=tc.function.name
             try: args=json.loads(tc.function.arguments or "{}")
             except: args={}
+            tspan=start_span(f"tool:{fname}")
             res=growth_gateway(db, fname, args)
+            end_span(tspan)
             tcr=AgentToolCall(run_id=run.id, session_id=sess.id, tool=fname, input=args, output=res)
             db.add(tcr); db.commit()
             tool_log.append({"tool": fname, "input": args, "output": res})

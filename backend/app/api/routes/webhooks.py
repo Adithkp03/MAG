@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from ...core.database import get_db
 from ...models.entities import Payment, Order, Checkout, AuditEvent, WebhookEvent
 from ...core.events import publish
+from ...core.tracing import start_span, end_span
 from ...services.razorpay_adapter import verify_webhook_signature, fetch_payment
 import json, hmac, hashlib
 
@@ -73,7 +74,7 @@ async def razorpay_webhook(request: Request, db: Session = Depends(get_db)):
         db.commit()
         ae=AuditEvent(merchant_id=pay.merchant_id or "m_demo", action="webhook_payment_failed", amount=pay.amount, policy_result="n/a", authorization="n/a", result="failed", reason=event_type, payload={"event_id": event_id, "payment_id": pay.id})
         db.add(ae); we.processed=True; db.commit()
-        publish("payment.failed", {"payment_id": pay.id})
+        end_span(wspan, attrs={"result":"failed"}); publish("payment.failed", {"payment_id": pay.id})
         return {"status":"failed processed", "payment_id": pay.id, "event_id": event_id}
 
     # captured
@@ -91,7 +92,7 @@ async def razorpay_webhook(request: Request, db: Session = Depends(get_db)):
     db.commit()
     ae=AuditEvent(merchant_id=pay.merchant_id or "m_demo", action="webhook_payment_captured", amount=pay.amount, policy_result="n/a", authorization="n/a", result="captured", reason=event_type, payload={"event_id": event_id, "payment_id": pay.id, "razorpay_order_id": razorpay_order_id})
     db.add(ae); we.processed=True; db.commit()
-    publish("payment.captured", {"payment_id": pay.id})
+    end_span(wspan, attrs={"result":"captured"}); publish("payment.captured", {"payment_id": pay.id})
     return {"status":"captured", "payment_id": pay.id, "event_id": event_id, "razorpay_order_id": razorpay_order_id}
 
 @router.get("/events")

@@ -8,13 +8,16 @@ from ...services.catalog import search_products
 
 router = APIRouter(prefix="/products", tags=["catalog"])
 
-@router.get("", response_model=list)
+@router.get("")
 def list_products(merchant_id: str = None, q: str = "", category: str = "", max_price: int = None, db: Session = Depends(get_db)):
-    return search_products(db, merchant_id, q, category, max_price)
+    rows=search_products(db, merchant_id, q, category, max_price)
+    # manual serialize to avoid Pydantic ORM mismatch
+    return [{"id":r.id,"name":r.name,"description":r.description,"price":r.price,"category":r.category,"stock":r.stock,"merchant_id":r.merchant_id} for r in rows]
 
-@router.get("/search", response_model=list)
+@router.get("/search")
 def search(q: str = Query("", description="search query"), merchant_id: str = None, category: str = "", max_price: int = None, db: Session = Depends(get_db)):
-    return search_products(db, merchant_id, q, category, max_price)
+    rows=search_products(db, merchant_id, q, category, max_price)
+    return [{"id":r.id,"name":r.name,"description":r.description,"price":r.price,"category":r.category,"stock":r.stock,"merchant_id":r.merchant_id} for r in rows]
 
 @router.get("/{product_id}", response_model=ProductOut, responses={404: {"model": ErrorResponse}})
 def get_product(product_id: str, db: Session = Depends(get_db)):

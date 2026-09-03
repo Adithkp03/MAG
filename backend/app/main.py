@@ -3,11 +3,41 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .core.database import Base, engine, SessionLocal
 from .models.entities import Merchant, Customer, Product, Policy
-from .api.routes import products, carts, checkout, orders, trust, webhooks, agent, payments, recommendations, ucp, growth, growth_agent, campaigns
+from .api.routes import products, carts, checkout, orders, trust, webhooks, agent, payments, recommendations, ucp, growth, growth_agent, campaigns, evaluation
 
-app = FastAPI(title="Merchant Autonomous Growth & Commerce Agent", version="0.14.0")
+app = FastAPI(title="Merchant Autonomous Growth & Commerce Agent", version="0.16.0")
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+# Observability: trace per request
+from fastapi import Request
+from .core.tracing import start_trace, end_trace, start_span, end_span, get_trace_id
+@app.middleware("http")
+async def trace_middleware(request: Request, call_next):
+    tid=start_trace(f"{request.method} {request.url.path}")
+    s=start_span(f"http:{request.method} {request.url.path}", attrs={"path": str(request.url.path)})
+    try:
+        response=await call_next(request)
+        end_span(s, status="ok", attrs={"status": response.status_code})
+        response.headers["X-Trace-Id"]=tid
+        return response
+    except Exception as e:
+        end_span(s, status="error", attrs={"error": str(e)[:200]})
+        raise
+    finally:
+        end_trace(tid)
+
+@app.get("/api/v1/traces")
+def list_traces_ep(limit: int=20):
+    from .core.tracing import list_traces
+    return {"traces": list_traces(limit)}
+
+@app.get("/api/v1/traces/{trace_id}")
+def get_trace_ep(trace_id: str):
+    from .core.tracing import get_trace
+    tr=get_trace(trace_id)
+    if not tr: return {"error":"not found"}
+    return tr
 
 # P0: create new tables Approval/WebhookEvent and handle missing columns via create_all (idempotent)
 Base.metadata.create_all(bind=engine)
@@ -66,6 +96,7 @@ app.include_router(ucp.router, prefix="/api/v1")
 app.include_router(growth.router)
 app.include_router(growth_agent.router)
 app.include_router(campaigns.router)
+app.include_router(evaluation.router, prefix="/api/v1")
 
 @app.get("/health")
 def health():
