@@ -4,6 +4,7 @@ from typing import Optional
 from datetime import datetime
 from sqlalchemy.orm import Session
 from ...core.database import get_db
+from ...core.auth import require_merchant_auth
 from ...core.events import publish
 from ...models.entities import Campaign, CampaignAudience, CampaignAction, CampaignRun, CampaignMetric, Product
 from ...services.growth_intelligence import compute_product_metrics, rank_candidates
@@ -20,7 +21,7 @@ class ProposeIn(BaseModel):
     name: Optional[str] = None
 
 @router.post("/propose")
-def propose(body: ProposeIn, db: Session = Depends(get_db)):
+def propose(body: ProposeIn, db: Session = Depends(get_db), merchant=Depends(require_merchant_auth)):
     from ...models.entities import Policy
     pol=db.query(Policy).filter(Policy.merchant_id==body.merchant_id).first()
     max_disc=pol.max_discount if pol else 15
@@ -71,7 +72,7 @@ def approve(campaign_id: str, approved_by: str = Header(None, alias="X-Approved-
     return {"campaign_id": camp.id, "status": camp.status, "approved_by": approved_by}
 
 @router.post("/{campaign_id}/execute")
-def execute(campaign_id: str, db: Session = Depends(get_db)):
+def execute(campaign_id: str, db: Session = Depends(get_db), merchant=Depends(require_merchant_auth)):
     camp=db.query(Campaign).filter(Campaign.id==campaign_id).first()
     if not camp: raise HTTPException(status_code=404, detail={"code":"not_found","message":"campaign not found"})
     if camp.status!="approved": raise HTTPException(status_code=409, detail={"code":"invalid_state","message":"campaign must be approved before execute"})
@@ -87,22 +88,25 @@ def execute(campaign_id: str, db: Session = Depends(get_db)):
     return {"campaign_id": camp.id, "run_id": run.id, "status": camp.status, "message":"campaign activated"}
 
 @router.get("")
-def list_campaigns(merchant_id: str="m_demo", db: Session = Depends(get_db)):
+def list_campaigns(merchant_id: str="m_demo", db: Session = Depends(get_db), merchant=Depends(require_merchant_auth)):
     rows=db.query(Campaign).filter(Campaign.merchant_id==merchant_id).order_by(Campaign.created_at.desc()).all()
     return {"campaigns": [{"id": c.id, "name": c.name, "target": c.target_category, "discount": c.discount, "status": c.status, "expected_inr": round(c.expected_incremental_paise/100,2), "reason": c.proposal_reason} for c in rows]}
 
 @router.get("/{campaign_id}")
-def get_campaign(campaign_id: str, db: Session = Depends(get_db)):
+def get_campaign(campaign_id: str, db: Session = Depends(get_db), merchant=Depends(require_merchant_auth)):
     c=db.query(Campaign).filter(Campaign.id==campaign_id).first()
     if not c: raise HTTPException(status_code=404, detail={"code":"not_found","message":"campaign not found"})
     aud=db.query(CampaignAudience).filter(CampaignAudience.campaign_id==c.id).all()
     acts=db.query(CampaignAction).filter(CampaignAction.campaign_id==c.id).all()
     runs=db.query(CampaignRun).filter(CampaignRun.campaign_id==c.id).all()
     mets=db.query(CampaignMetric).filter(CampaignMetric.campaign_id==c.id).all()
-    return {"campaign": {"id": c.id, "name": c.name, "status": c.status, "reason": c.proposal_reason, "expected_inr": round(c.expected_incremental_paise/100,2), "approved_by": c.approved_by}, "audience": [{"segment": a.segment, "count": a.customer_count} for a in aud], "actions": [{"type": a.action_type, "payload": a.payload} for a in acts], "runs": [{"id": r.id, "status": r.status} for r in runs], "metrics": [{"conversions": m.conversions, "revenue_inr": round(m.revenue_paise/100,2)} for m in mets]}
+    total_rev=sum(m.revenue_paise for m in mets)
+    total_conv=sum(m.conversions for m in mets)
+    uplift_pct=round((total_rev - c.expected_incremental_paise)/max(c.expected_incremental_paise,1)*100,1) if total_rev else None
+    return {"campaign": {"id": c.id, "name": c.name, "status": c.status, "reason": c.proposal_reason, "expected_inr": round(c.expected_incremental_paise/100,2), "measured_inr": round(total_rev/100,2), "measured_conversions": total_conv, "uplift_vs_expected_pct": uplift_pct, "approved_by": c.approved_by}, "audience": [{"segment": a.segment, "count": a.customer_count} for a in aud], "actions": [{"type": a.action_type, "payload": a.payload} for a in acts], "runs": [{"id": r.id, "status": r.status} for r in runs], "metrics": [{"conversions": m.conversions, "revenue_inr": round(m.revenue_paise/100,2), "uplift_paise": m.uplift_paise} for m in mets]}
 
 @router.post("/{campaign_id}/metric")
-def record_metric(campaign_id: str, conversions: int=0, revenue_paise: int=0, db: Session = Depends(get_db)):
+def record_metric(campaign_id: str, conversions: int=0, revenue_paise: int=0, db: Session = Depends(get_db), merchant=Depends(require_merchant_auth)):
     c=db.query(Campaign).filter(Campaign.id==campaign_id).first()
     if not c: raise HTTPException(status_code=404, detail={"code":"not_found","message":"campaign not found"})
     met=CampaignMetric(campaign_id=c.id, conversions=conversions, revenue_paise=revenue_paise, uplift_paise=revenue_paise)

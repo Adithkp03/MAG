@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from ...core.database import get_db
+from ...core.auth import require_merchant_auth
 from ...models.entities import Payment, Order, AuditEvent
 from ...services.razorpay_adapter import create_razorpay_order, has_keys
 from ...schemas import PaymentCreate, PaymentOut, ErrorResponse
@@ -50,13 +51,13 @@ async def create_payment(payload: PaymentCreate, db: Session = Depends(get_db), 
     return {"payment": pay_dict, "razorpay_order": rzp_order, "has_live_keys": has_keys()}
 
 @router.get("/{payment_id}", response_model=PaymentOut, responses={404: {"model": ErrorResponse}})
-def get_payment(payment_id: str, db: Session = Depends(get_db)):
+def get_payment(payment_id: str, db: Session = Depends(get_db), merchant=Depends(require_merchant_auth)):
     p=db.query(Payment).filter(Payment.id==payment_id).first()
     if not p: raise HTTPException(status_code=404, detail={"code":"payment_not_found","message":"not found"})
     return p
 
 @router.get("", response_model=list)
-def list_payments(db: Session = Depends(get_db)):
+def list_payments(db: Session = Depends(get_db), merchant=Depends(require_merchant_auth)):
     return db.query(Payment).limit(50).all()
 
 @router.post("/verify")
@@ -66,7 +67,7 @@ async def verify(payload: dict):
     return {"verified": ok}
 
 @router.post("/reconcile")
-async def reconcile(payload: dict, db: Session = Depends(get_db)):
+async def reconcile(payload: dict, db: Session = Depends(get_db), merchant=Depends(require_merchant_auth)):
     """P0-6 payment reconciliation: fetch Razorpay status and sync DB if webhook missed"""
     payment_id = payload.get("payment_id")
     pay = db.query(Payment).filter(Payment.id==payment_id).first()

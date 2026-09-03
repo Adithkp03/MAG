@@ -177,6 +177,7 @@ class AgentRun(Base):
     created_at=Column(DateTime, default=datetime.utcnow)
     completed_at=Column(DateTime, nullable=True)
     final_reply=Column(Text, nullable=True)
+    termination_reason=Column(String, nullable=True)  # P0 #8 completed|blocked|needs_approval|max_steps_exceeded|tool_error|fallback
 
 class AgentMessage(Base):
     __tablename__="agent_messages"

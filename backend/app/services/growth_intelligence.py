@@ -116,5 +116,5 @@ def rank_candidates(db: Session, context_category: str, merchant_id: str="m_demo
     for score,m,aff in candidates[:limit]:
         out.append({"product": {"id": m["product_id"], "name": m["name"], "category": m["category"], "price": m["price"], "stock": m["stock"]},
                     "score": round(score,3), "reason": f"attach {aff:.0%} from {m['order_count']} orders, conv {m['conversion_rate']:.0%}, stock {m['stock']}",
-                    "expected_uplift_pct": round(score*12,1), "affinity": round(aff,3), "conversion_rate": m["conversion_rate"]})
+                    "recommendation_score": round(score,3), "affinity": round(aff,3), "conversion_rate": m["conversion_rate"], "expected_uplift_pct": None, "note": "uplift measured only after campaign outcome"})
     return out

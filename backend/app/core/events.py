@@ -88,6 +88,61 @@ def health():
         except Exception as e: return {"backend":"redis","ok": False, "error": str(e)}
     return {"backend":"memory","ok": True, "note": "set REDIS_URL for Redis Streams"}
 
+
+def create_consumer_group(stream: str, group: str):
+    """Idempotent consumer group creation (XGROUP CREATE MKSTREAM)"""
+    r=_get_redis()
+    if not r: return {"backend":"memory","note":"no redis - consumers run in-process on memory streams"}
+    try:
+        # MKSTREAM creates stream if not exists
+        r.xgroup_create(stream, group, id="0", mkstream=True)
+        return {"ok": True, "stream": stream, "group": group}
+    except Exception as e:
+        if "BUSYGROUP" in str(e):
+            return {"ok": True, "stream": stream, "group": group, "existing": True}
+        return {"ok": False, "error": str(e)}
+
+def consume(group: str, consumer: str, streams: dict, count: int=10, block_ms: int=500):
+    """XREADGROUP for consumer group; falls back to memory streams"""
+    r=_get_redis()
+    if r:
+        try:
+            # ensure groups
+            for s in streams:
+                create_consumer_group(s, group)
+            resp=r.xreadgroup(group, consumer, streams, count=count, block=block_ms)
+            out=[]
+            for stream_name, entries in (resp or []):
+                for eid, fields in entries:
+                    try: payload=json.loads(fields.get("payload","{}"))
+                    except: payload=fields.get("payload")
+                    out.append({"stream": stream_name, "id": eid, "event_id": fields.get("event_id"), "type": fields.get("type"), "payload": payload})
+                    # ack
+                    try: r.xack(stream_name, group, eid)
+                    except: pass
+            return out
+        except Exception as e:
+            print(f"consume failed {e}")
+    # memory fallback: drain from _memory_streams
+    out=[]
+    for s, cnt in streams.items():
+        # s is like mag:events:cart.created -> type is after last :
+        typ=s.split(":")[-1] if ":" in s else s
+        buf=_memory_streams.get(typ, [])
+        # also check "all" as aggregation
+        take=min(cnt if isinstance(cnt, int) else 10, len(buf))
+        for _ in range(take):
+            if buf:
+                evt=buf.pop(0)
+                out.append({"stream": s, "id": evt["event_id"], "event_id": evt["event_id"], "type": evt["type"], "payload": evt["payload"]})
+    return out
+
+def ack(stream: str, group: str, eid: str):
+    r=_get_redis()
+    if r:
+        try: r.xack(stream, group, eid)
+        except: pass
+
 # Event names per spec
 EVENTS = [
     "cart.created","cart.updated",

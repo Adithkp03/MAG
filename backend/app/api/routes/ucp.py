@@ -13,7 +13,7 @@ router = APIRouter(prefix="/ucp", tags=["ucp"])
 
 @router.get("/discover")
 def discover(db: Session = Depends(get_db)):
-    return {"merchant_id":"m_demo","name":"Demo Merchant","capabilities":["catalog","checkout","payment"], "profile":"/.well-known/ucp", "endpoints": {"catalog":"/api/v1/ucp/catalog","checkout":"/api/v1/ucp/checkout"}}
+    return {"merchant_id":"m_demo","name":"Demo Merchant","capabilities":["catalog","checkout","payment","policy","approval","trusted_ui"], "implemented":["catalog","checkout","get","update","complete","cancel","policy","approval","trusted_ui","razorpay","audit"], "profile":"/.well-known/ucp", "endpoints": {"catalog":"/api/v1/ucp/catalog","checkout":"/api/v1/ucp/checkout","get":"/api/v1/ucp/checkout/{id}","update":"PUT /api/v1/ucp/checkout/{id}","complete":"POST /api/v1/ucp/checkout/{id}/complete","cancel":"POST /api/v1/ucp/checkout/{id}/cancel","trusted_ui":"/api/v1/checkout/{id}/approve","well_known":"/.well-known/ucp"}, "note":"All UCP ops delegate to canonical Commerce Core — no duplicated logic; AP2 Mandates hint in 402"}
 
 @router.get("/catalog")
 def catalog(q: str="", category: str="", max_price: int=None, db: Session = Depends(get_db)):

@@ -23,6 +23,8 @@ export default function Dashboard() {
   const [events,setEvents]=useState([]);
   const [kpis,setKpis]=useState(null);
   const [traces,setTraces]=useState([]);
+  const [opps,setOpps]=useState([]);
+  const [camps,setCamps]=useState([]);
   const [errs,setErrs]=useState([]);
   const [chat,setChat]=useState(''); const [chatLog,setChatLog]=useState([]);
 
@@ -45,6 +47,10 @@ export default function Dashboard() {
       if (!kp._error) setKpis(kp);
       const tr = await safeFetch(API+'/api/v1/traces?limit=3');
       if (!tr._error) setTraces(tr.traces || []);
+      const op = await safeFetch(API+'/growth/opportunities');
+      if (!op._error) setOpps(op.opportunities || []);
+      const ca = await safeFetch(API+'/api/v1/campaigns?merchant_id=m_demo');
+      if (!ca._error) setCamps(ca.campaigns || []);
       if (e.length) setErrs(e);
     })();
   },[]);
@@ -73,7 +79,7 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen p-6 max-w-7xl mx-auto bg-black text-zinc-100">
       <header className="flex justify-between items-center mb-4">
-        <h1 className="text-2xl font-bold">Merchant Autonomous Growth & Commerce Agent <span className="text-sm font-normal text-zinc-400">v{health?.version || '0.16.0'} — Events + Traces + Evaluation live</span></h1>
+        <h1 className="text-2xl font-bold">Merchant Autonomous Growth & Commerce Agent <span className="text-sm font-normal text-zinc-400">v{health?.version || '0.17.0'} — Events + Traces + Evaluation live</span></h1>
         <div className="text-xs bg-zinc-800 px-3 py-1 rounded">Backend {health?.version || '...'} | {health?.groq} | razorpay:{health?.razorpay} | db:{health?.db?.slice(0,22)}</div>
       </header>
       {errs.length>0 && <div className="bg-amber-950 border border-amber-800 text-amber-200 text-xs p-2 rounded mb-4">Fetch warnings: {errs.join(' | ')} — backend must be on {API} (uvicorn --port 8001). Check <a className="underline" href={API+'/health'} target="_blank">{API}/health</a> and <a className="underline" href={API+'/docs'} target="_blank">/docs</a></div>}
@@ -97,7 +103,16 @@ export default function Dashboard() {
           </div>
           <div className="bg-zinc-900 rounded border border-zinc-800 p-4">
             <h2 className="font-semibold mb-3">AI Action — Why did the agent do this? (Explainability)</h2>
-            {recs.map((r,i)=><div key={i} className="border border-zinc-800 rounded p-3 mb-2"><div className="font-medium">{r.product.name} — ₹{(r.product.price/100).toFixed(0)}</div><div className="text-xs text-zinc-400">Reason: {r.reason}</div><div className="text-xs">Expected uplift: {r.expected_uplift_pct}% | Affinity {(r.affinity*100).toFixed(0)}% • Score {r.score}</div></div>)}{recs.length===0 && <div className="text-xs text-zinc-500">No recommendations — seed orders first</div>}
+            {recs.map((r,i)=><div key={i} className="border border-zinc-800 rounded p-3 mb-2"><div className="font-medium">{r.product.name} — ₹{(r.product.price/100).toFixed(0)}</div><div className="text-xs text-zinc-400">Reason: {r.reason}</div><div className="text-xs">Recommendation score: {r.recommendation_score ?? r.score} | Affinity {(r.affinity*100).toFixed(0)}% {r.expected_uplift_pct?`• Uplift ${r.expected_uplift_pct}%`:``} {r.note?`• ${r.note}`:``}</div></div>)}{recs.length===0 && <div className="text-xs text-zinc-500">No recommendations — seed orders first</div>}
+          </div>
+          <div className="bg-zinc-900 rounded border border-zinc-800 p-4">
+            <h2 className="font-semibold mb-2">Growth Opportunities — Evidence Pipeline</h2>
+            <div className="text-xs text-zinc-400 mb-2">Orders → Profiles → Affinity → Expected Revenue → Recommendation → Outcome</div>
+            {opps.map((o,i)=><div key={i} className="border border-zinc-800 rounded p-2 mb-2"><div className="font-medium">{o.context_category} → {o.recommend || o.recommend_category} — ₹{o.expected_revenue_inr || 0} expected</div><div className="text-zinc-400">{o.opportunity}</div><div className="text-zinc-500">{o.evidence} • score {o.score}</div></div>)}{opps.length===0 && <div className="text-zinc-500">No strong opportunities — need more orders</div>}
+          </div>
+          <div className="bg-zinc-900 rounded border border-zinc-800 p-4">
+            <h2 className="font-semibold mb-2">Campaigns — Proposed → Approved → Active → Measured</h2>
+            {camps.slice(0,4).map(c=><div key={c.id} className="border border-zinc-800 rounded p-2 mb-2"><div className="font-medium text-xs">{c.name} — {c.status}</div><div className="text-xs text-zinc-400">{c.reason}</div><div className="text-xs">Expected ₹{c.expected_inr} {c.measured_inr?`• Measured ₹${c.measured_inr} (${c.measured_conversions} conv)`:``}</div></div>)}{camps.length===0 && <div className="text-zinc-500 text-xs">No campaigns — propose via POST /api/v1/campaigns/propose</div>}
           </div>
           <div className="bg-zinc-900 rounded border border-zinc-800 p-4">
             <h2 className="font-semibold mb-2">Traces — TRACE #92AF (OpenTelemetry-style)</h2>

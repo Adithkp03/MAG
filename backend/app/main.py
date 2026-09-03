@@ -3,9 +3,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .core.database import Base, engine, SessionLocal
 from .models.entities import Merchant, Customer, Product, Policy
-from .api.routes import products, carts, checkout, orders, trust, webhooks, agent, payments, recommendations, ucp, growth, growth_agent, campaigns, evaluation
+from .api.routes import products, carts, checkout, orders, trust, webhooks, agent, payments, recommendations, ucp, growth, growth_agent, campaigns, evaluation, workers
 
-app = FastAPI(title="Merchant Autonomous Growth & Commerce Agent", version="0.16.0")
+app = FastAPI(title="Merchant Autonomous Growth & Commerce Agent", version="0.19.0")
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
@@ -29,8 +29,8 @@ async def trace_middleware(request: Request, call_next):
 
 @app.get("/api/v1/traces")
 def list_traces_ep(limit: int=20):
-    from .core.tracing import list_traces
-    return {"traces": list_traces(limit)}
+    from .core.tracing import list_traces, label
+    return {"traces": list_traces(limit), "tracing": label()}
 
 @app.get("/api/v1/traces/{trace_id}")
 def get_trace_ep(trace_id: str):
@@ -96,13 +96,14 @@ app.include_router(ucp.router, prefix="/api/v1")
 app.include_router(growth.router)
 app.include_router(growth_agent.router)
 app.include_router(campaigns.router)
+app.include_router(workers.router, prefix="/api/v1")
 app.include_router(evaluation.router, prefix="/api/v1")
 
 @app.get("/health")
 def health():
     from .core.config import settings
     from .services.razorpay_adapter import has_keys
-    return {"status":"ok", "phase":"2 razorpay", "version": app.version, "groq": "configured" if settings.groq_api_key and "xxx" not in settings.groq_api_key else "missing - set GROQ_API_KEY", "razorpay": "live" if has_keys() else "mock (set RAZORPAY_KEY_ID)", "webhook": "/api/v1/webhooks/razorpay", "db": settings.database_url.split("@")[-1][:40]}
+    return {"status":"ok", "phase":"2 razorpay", "version": app.version, "groq": "configured" if settings.groq_api_key and "xxx" not in settings.groq_api_key else "missing - set GROQ_API_KEY", "razorpay": "live" if has_keys() else "mock (set RAZORPAY_KEY_ID)", "webhook": "/api/v1/webhooks/razorpay", "db": settings.database_url.split("@")[-1][:40], "migrations": "alembic upgrade head", "tracing": "agent_execution_tracing (set OTEL_EXPORTER_OTLP_ENDPOINT for OTel)"}
 
 @app.get("/")
 def root():
@@ -118,10 +119,6 @@ def events_health():
     from .core.events import health as ev_health
     return ev_health()
 
-@app.get("/api/v1/workers/run")
-def workers_run():
-    from .workers.event_workers import run_all
-    return run_all()
 
 @app.get("/api/v1/events/stream/{event_type}")
 def stream_by_type(event_type: str, limit: int=20):

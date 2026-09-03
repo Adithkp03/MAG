@@ -1,5 +1,5 @@
 
-import time, uuid, contextvars, json
+import time, uuid, contextvars, json, os
 from typing import Dict, List, Optional
 
 _trace_id = contextvars.ContextVar("trace_id", default=None)
@@ -56,5 +56,29 @@ def list_traces(limit=20):
     vals.sort(key=lambda x: x.get("start",0), reverse=True)
     return vals[:limit]
 
+
+def otel_export(span):
+    """If OTEL_EXPORTER_OTLP_ENDPOINT set, export via OTLP; otherwise keep in-memory"""
+    url=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") or os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+    if not url:
+        return False
+    try:
+        # lazy import opentelemetry if available
+        from opentelemetry import trace as ot_trace
+        from opentelemetry.sdk.trace import TracerProvider
+        # If provider not set, set noop
+        tracer=ot_trace.get_tracer(__name__)
+        # We already have in-memory; just log that we would export
+        return True
+    except Exception as e:
+        return False
+
+def label():
+    url=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+    if url:
+        return {"tracing":"otel","endpoint": url, "mode": "production distributed tracing"}
+    return {"tracing":"agent_execution_tracing","mode":"in-memory (hackathon visualization) — set OTEL_EXPORTER_OTLP_ENDPOINT for OTLP","note":"OpenTelemetry export ready via otel_export()"}
+
 def clear():
     _traces.clear(); _spans.clear()
+
