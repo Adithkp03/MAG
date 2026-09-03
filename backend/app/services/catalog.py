@@ -8,9 +8,13 @@ def search_products(db: Session, merchant_id: str = None, q: str = "", category:
     # combine q and category as keyword search (agent often sends category as free text)
     keywords = " ".join([k for k in [q, category] if k]).strip()
     if keywords:
-        # split keywords and match any token against name/description/category
-        for token in keywords.split():
-            query = query.filter(or_(Product.name.ilike(f"%{token}%"), Product.description.ilike(f"%{token}%"), Product.category.ilike(f"%{token}%")))
+        tokens=keywords.split()
+        conds=[]
+        for token in tokens:
+            conds.append(Product.name.ilike(f"%{token}%"))
+            conds.append(Product.description.ilike(f"%{token}%"))
+            conds.append(Product.category.ilike(f"%{token}%"))
+        query = query.filter(or_(*conds))
     if max_price:
         if max_price < 10000:
             max_price = max_price * 100

@@ -3,13 +3,29 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .core.database import Base, engine, SessionLocal
 from .models.entities import Merchant, Customer, Product, Policy
-from .api.routes import products, carts, checkout, orders, trust, webhooks, agent, payments, recommendations, ucp
+from .api.routes import products, carts, checkout, orders, trust, webhooks, agent, payments, recommendations, ucp, growth, growth_agent, campaigns
 
-app = FastAPI(title="Merchant Autonomous Growth & Commerce Agent", version="0.4.0 Phase5-Growth")
+app = FastAPI(title="Merchant Autonomous Growth & Commerce Agent", version="0.14.0")
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
+# P0: create new tables Approval/WebhookEvent and handle missing columns via create_all (idempotent)
 Base.metadata.create_all(bind=engine)
+# migrate missing columns for existing Supabase DB (additive only)
+try:
+    from sqlalchemy import text as _text
+    with engine.connect() as conn:
+        for ddl in [
+            "ALTER TABLE merchants ADD COLUMN IF NOT EXISTS api_key TEXT",
+            "ALTER TABLE policies ADD COLUMN IF NOT EXISTS version INT DEFAULT 1",
+            "ALTER TABLE policies ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP",
+            "ALTER TABLE checkouts ADD COLUMN IF NOT EXISTS policy_version INT DEFAULT 1",
+            "ALTER TABLE approvals ADD COLUMN IF NOT EXISTS decided_at TIMESTAMP",
+        ]:
+            try: conn.execute(_text(ddl)); conn.commit()
+            except Exception as e: print(f"migrate skip {ddl[:30]}: {e}")
+except Exception as e:
+    print(f"migrate warn: {e}")
 
 # seed on startup if empty
 def seed():
@@ -47,6 +63,9 @@ app.include_router(agent.router, prefix="/api/v1")
 app.include_router(payments.router, prefix="/api/v1")
 app.include_router(recommendations.router, prefix="/api/v1")
 app.include_router(ucp.router, prefix="/api/v1")
+app.include_router(growth.router)
+app.include_router(growth_agent.router)
+app.include_router(campaigns.router)
 
 @app.get("/health")
 def health():
@@ -63,6 +82,21 @@ def events(limit: int=20):
     from .core.events import list_events
     return list_events(limit)
 
+@app.get("/api/v1/events/health")
+def events_health():
+    from .core.events import health as ev_health
+    return ev_health()
+
+@app.get("/api/v1/workers/run")
+def workers_run():
+    from .workers.event_workers import run_all
+    return run_all()
+
+@app.get("/api/v1/events/stream/{event_type}")
+def stream_by_type(event_type: str, limit: int=20):
+    from .core.events import list_stream
+    return {event_type: list_stream(event_type, limit)}
+
 # UCP stub for Phase 6 - advertises capabilities
 @app.get("/.well-known/ucp")
 def ucp_profile():
@@ -70,5 +104,5 @@ def ucp_profile():
         "ucp_version":"1.0-draft",
         "merchant_id":"m_demo",
         "capabilities":["discover","catalog","checkout","payment"],
-        "endpoints":{"checkout":"/api/v1/checkout","products":"/api/v1/products","webhooks":"/api/v1/webhooks/razorpay","recommendations":"/api/v1/recommendations/cross-sell","payments":"/api/v1/payments"}
+        "endpoints":{"checkout":"/api/v1/ucp/checkout","catalog":"/api/v1/ucp/catalog","discover":"/api/v1/ucp/discover","internal_checkout":"/api/v1/checkout","webhooks":"/api/v1/webhooks/razorpay","trusted_ui":"/api/v1/checkout/{id}/approve"}
     }

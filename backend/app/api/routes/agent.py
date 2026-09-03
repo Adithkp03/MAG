@@ -79,3 +79,39 @@ def execute_tool(name, args, db, merchant_id):
 @router.get("/sessions/{session_id}/audit")
 def session_audit(session_id: str, db: Session = Depends(get_db)):
     return db.query(AuditEvent).filter(AuditEvent.payload.contains(session_id) if False else True).limit(20).all()
+
+@router.post("/run", tags=["agent"])
+def agent_run(payload: dict, db: Session = Depends(get_db)):
+    from ...agent.runtime import run_agent
+    merchant_id=payload.get("merchant_id","m_demo")
+    customer_id=payload.get("customer_id")
+    message=payload.get("message","")
+    session_id=payload.get("session_id")
+    model=payload.get("model")
+    result=run_agent(db, merchant_id, customer_id, message, session_id, model)
+    run=result["run"]
+    # serialize
+    return {
+        "run_id": run.id,
+        "session_id": run.session_id,
+        "status": run.status,
+        "final_reply": run.final_reply,
+        "tool_calls": result.get("tool_calls",[]),
+        "groq": not result.get("fallback", False)
+    }
+
+@router.get("/runs/{run_id}")
+def get_run(run_id: str, db: Session = Depends(get_db)):
+    from ...models.entities import AgentRun, AgentToolCall, AgentMessage
+    run=db.query(AgentRun).filter(AgentRun.id==run_id).first()
+    if not run: return {"error":"not found"}
+    tcs=db.query(AgentToolCall).filter(AgentToolCall.run_id==run_id).order_by(AgentToolCall.created_at).all()
+    msgs=db.query(AgentMessage).filter(AgentMessage.run_id==run_id).order_by(AgentMessage.created_at).all()
+    return {"run": {"id": run.id, "status": run.status, "user_message": run.user_message, "final_reply": run.final_reply, "created_at": run.created_at, "completed_at": run.completed_at}, "tool_calls": [{"tool": tc.tool, "input": tc.input, "output": tc.output, "policy_result": tc.policy_result} for tc in tcs], "messages": [{"role": m.role, "content": m.content[:500]} for m in msgs]}
+
+@router.get("/sessions/{session_id}/runs")
+def session_runs(session_id: str, db: Session = Depends(get_db)):
+    from ...models.entities import AgentRun
+    runs=db.query(AgentRun).filter(AgentRun.session_id==session_id).order_by(AgentRun.created_at.desc()).limit(10).all()
+    return [{"id": r.id, "status": r.status, "user_message": r.user_message[:80], "final_reply": (r.final_reply or "")[:120]} for r in runs]
+
