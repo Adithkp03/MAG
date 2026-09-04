@@ -456,7 +456,7 @@ def learning_update(db: Session, merchant_id: str="m_demo"):
     return updates
 
 def run_autonomous_cycle(db: Session, merchant_id: str="m_demo"):
-    """Autonomous: Observe -> detect -> rank -> decide -> authorize -> execute -> measure -> learn"""
+    """Autonomous: Observe -> detect -> rank -> decide -> authorize -> execute -> measure -> learn (Phase 10 full loop)"""
     # Detect
     opps=detect_opportunities(db, merchant_id)
     scored=score_opportunities(db, merchant_id)
@@ -464,4 +464,16 @@ def run_autonomous_cycle(db: Session, merchant_id: str="m_demo"):
         return {"opportunities": [], "top": None, "action": None}
     top=scored[0]
     planned=plan_action(db, top.id)
-    return {"opportunities": [{"id": o.id, "type": o.type, "priority": o.priority, "expected_inr": round((o.expected_revenue or 0)/100,2)} for o in scored[:7]], "top": {"id": top.id, "type": top.type, "priority": top.priority, "expected_revenue_inr": round((top.expected_revenue or 0)/100,2), "expected_margin_inr": round((top.expected_margin or 0)/100,2), "confidence": top.confidence, "risk": top.risk}, "planned": planned}
+    # Phase 10: policy -> execute -> measure if auto_approved
+    executed=None
+    measured=None
+    if planned and planned["policy"]["decision"]=="auto_approved":
+        camp=planned["campaign"]
+        # authorize and execute
+        exec_res=execute_campaign(db, camp.id)
+        if exec_res and "metric" in exec_res:
+            executed={"campaign_id": camp.id, "status": exec_res["campaign"].status, "funnel": exec_res["funnel"]}
+            measured={"revenue_inr": round((exec_res["metric"].revenue_paise or 0)/100,2), "uplift_inr": round((exec_res["metric"].uplift_paise or 0)/100,2)}
+    # learn step
+    learning=learning_update(db, merchant_id)
+    return {"opportunities": [{"id": o.id, "type": o.type, "priority": o.priority, "expected_inr": round((o.expected_revenue or 0)/100,2)} for o in scored[:7]], "top": {"id": top.id, "type": top.type, "priority": top.priority, "expected_revenue_inr": round((top.expected_revenue or 0)/100,2), "expected_margin_inr": round((top.expected_margin or 0)/100,2), "confidence": top.confidence, "risk": top.risk}, "planned": planned, "executed": executed, "measured": measured, "learning_updates": len(learning)}
