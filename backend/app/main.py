@@ -122,12 +122,12 @@ def seed():
             c = Customer(id="cust_demo", merchant_id="m_demo", name="Demo Customer", email="demo@customer.local")
             db.add(c)
             products_seed=[
-                {"id":"prod_kb1","merchant_id":"m_demo","name":"Gaming Keyboard RGB","description":"Mechanical gaming keyboard with RGB, blue switches","price":249900,"category":"keyboard","stock":42},
-                {"id":"prod_mouse1","merchant_id":"m_demo","name":"Wireless Gaming Mouse","description":"Ergonomic wireless mouse 16000 DPI","price":79900,"category":"mouse","stock":82},
-                {"id":"prod_laptop1","merchant_id":"m_demo","name":"Gaming Laptop 16GB","description":"RTX 4060 gaming laptop","price":750000,"category":"laptop","stock":5},
-                {"id":"prod_headset1","merchant_id":"m_demo","name":"Wireless Headset","description":"Noise cancelling wireless headset","price":349900,"category":"headset","stock":30},
-                {"id":"prod_mousepad1","merchant_id":"m_demo","name":"XL Mousepad","description":"900x400 mousepad","price":49900,"category":"mousepad","stock":100},
-                {"id":"prod_bag1","merchant_id":"m_demo","name":"Laptop Bag 15in","description":"Water resistant laptop bag","price":149900,"category":"bag","stock":25},
+                {"id":"prod_kb1","merchant_id":"m_demo","name":"Gaming Keyboard RGB","description":"Mechanical gaming keyboard with RGB, blue switches","price":249900,"cost_price":164934,"category":"keyboard","stock":42},
+                {"id":"prod_mouse1","merchant_id":"m_demo","name":"Wireless Gaming Mouse","description":"Ergonomic wireless mouse 16000 DPI","price":79900,"cost_price":43945,"category":"mouse","stock":82},
+                {"id":"prod_laptop1","merchant_id":"m_demo","name":"Gaming Laptop 16GB","description":"RTX 4060 gaming laptop","price":750000,"cost_price":637500,"category":"laptop","stock":5},
+                {"id":"prod_headset1","merchant_id":"m_demo","name":"Wireless Headset","description":"Noise cancelling wireless headset","price":349900,"cost_price":209940,"category":"headset","stock":30},
+                {"id":"prod_mousepad1","merchant_id":"m_demo","name":"XL Mousepad","description":"900x400 mousepad","price":49900,"cost_price":19960,"category":"mousepad","stock":100},
+                {"id":"prod_bag1","merchant_id":"m_demo","name":"Laptop Bag 15in","description":"Water resistant laptop bag","price":149900,"cost_price":89940,"category":"bag","stock":25},
             ]
             for p in products_seed:
                 db.add(Product(**p))

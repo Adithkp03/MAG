@@ -32,6 +32,7 @@ class Product(Base):
     name=Column(String, nullable=False)
     description=Column(Text)
     price=Column(Integer, nullable=False)  # paise
+    cost_price=Column(Integer, nullable=True)  # paise — Phase 3 real economics, margin = (price-cost)/price
     category=Column(String)
     image_url=Column(String, default="")
     stock=Column(Integer, default=100)

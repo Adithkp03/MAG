@@ -103,7 +103,7 @@ def compute_customer_intelligence(db: Session, merchant_id: str="m_demo"):
 
 def compute_product_intelligence(db: Session, merchant_id: str="m_demo"):
     from ..models.entities import Product, ProductProfile
-    prods=db.execute(sql_text("SELECT id, name, category, price, stock FROM products WHERE merchant_id=:mid"), {"mid": merchant_id}).mappings().all()
+    prods=db.execute(sql_text("SELECT id, name, category, price, cost_price, stock FROM products WHERE merchant_id=:mid"), {"mid": merchant_id}).mappings().all()
     # order stats
     order_count=db.execute(sql_text("SELECT COUNT(*) as cnt FROM orders WHERE merchant_id=:mid"), {"mid": merchant_id}).mappings().first()["cnt"] or 1
     total_rev=db.execute(sql_text("SELECT COALESCE(SUM(total),0) as rev FROM orders WHERE merchant_id=:mid AND status='paid'"), {"mid": merchant_id}).mappings().first()["rev"] or 1
@@ -132,10 +132,19 @@ def compute_product_intelligence(db: Session, merchant_id: str="m_demo"):
         conv=met["conversion_rate"] if met else 0
         # days of inventory
         doi=round(p["stock"]/max(velocity,0.1),1) if velocity else 999
-        # margin default 20% +/- category
-        margin=20
-        if p["category"] in ["mouse","mousepad"]: margin=35
-        if p["category"] in ["laptop"]: margin=15
+        # Phase 3: real margin from cost_price — no category defaults
+        price=p["price"]; cost=p["cost_price"]
+        if cost is not None and price and price>0:
+            margin=round((price-cost)/price*100)
+        elif price and price>0:
+            # backfill missing cost_price as 75% of price (25% margin) and persist if possible
+            margin=25
+            try:
+                db.execute(sql_text("UPDATE products SET cost_price=:cp WHERE id=:pid AND cost_price IS NULL"), {"cp": int(price*0.75), "pid": pid})
+                db.commit()
+            except: db.rollback()
+        else:
+            margin=0
         # demand trend: velocity vs previous period (simplistic: if sold>2 rising)
         trend="stable"
         if velocity>1.5: trend="rising"
@@ -150,7 +159,7 @@ def compute_product_intelligence(db: Session, merchant_id: str="m_demo"):
         prof.sales_velocity=velocity; prof.revenue_contribution=contrib; prof.margin_pct=margin; prof.inventory_level=p["stock"]
         prof.days_of_inventory=doi; prof.attach_rate=attach; prof.conversion_rate=conv; prof.demand_trend=trend; prof.slow_moving_score=round(slow,2)
         db.commit()
-        out.append({"product_id": pid, "name": p["name"], "category": p["category"], "price": p["price"], "price_inr": round(p["price"]/100,2), "stock": p["stock"], "velocity": velocity, "revenue_contribution": contrib, "margin_pct": margin, "doi": doi, "attach_rate": attach, "conversion": conv, "trend": trend, "slow_score": round(slow,2)})
+        out.append({"product_id": pid, "name": p["name"], "category": p["category"], "price": p["price"], "price_inr": round(p["price"]/100,2), "cost_price": cost, "cost_inr": round(cost/100,2) if cost else None, "stock": p["stock"], "velocity": velocity, "revenue_contribution": contrib, "margin_pct": margin, "doi": doi, "attach_rate": attach, "conversion": conv, "trend": trend, "slow_score": round(slow,2)})
     return out
 
 def detect_opportunities(db: Session, merchant_id: str="m_demo"):

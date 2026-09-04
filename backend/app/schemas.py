@@ -13,11 +13,12 @@ class ProductCreate(BaseModel):
     name: str
     description: Optional[str] = ""
     price: int = Field(..., description="paise, 100 paise = 1 INR")
+    cost_price: Optional[int] = Field(None, description="paise — Phase 3 real cost, margin = (price-cost)/price")
     category: Optional[str] = ""
     stock: int = 100
 
 class ProductOut(BaseModel):
-    id: str; merchant_id: str; name: str; description: str; price: int; category: str; stock: int
+    id: str; merchant_id: str; name: str; description: str; price: int; cost_price: Optional[int]=None; category: str; stock: int; margin_pct: Optional[int]=None
     class Config: from_attributes = True
 
 class CartCreate(BaseModel):
