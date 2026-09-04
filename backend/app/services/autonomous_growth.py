@@ -368,17 +368,36 @@ def plan_action(db: Session, opportunity_id: str):
     return {"opportunity": opp, "campaign": camp, "audience_count": count, "customer_ids": cust_ids[:5], "offer": f"{discount}%", "budget_inr": round(budget/100,2), "economics": {"expected_revenue": exp_rev, "expected_margin": exp_margin}, "policy": {"ok": policy_ok, "decision": decision}, "next": "approve -> execute -> measure"}
 
 def record_outcome(db: Session, campaign_id: str, funnel: dict):
-    """Outcome funnel: eligible->exposed->viewed->clicked->added->purchased->revenue->margin"""
+    """Outcome funnel: eligible->exposed->viewed->clicked->added->purchased->revenue->margin + 10% holdout incrementality (Phase 8)"""
     from ..models.entities import CampaignMetric, Campaign
     camp=db.query(Campaign).filter(Campaign.id==campaign_id).first()
     if not camp: return None
-    # funnel keys: eligible, exposed, viewed, clicked, added, purchased, revenue_paise, margin_paise
-    met=CampaignMetric(campaign_id=camp.id, impressions=funnel.get("exposed",0), conversions=funnel.get("purchased",0), revenue_paise=funnel.get("revenue_paise",0), uplift_paise=funnel.get("revenue_paise",0))
-    db.add(met); db.commit()
-    # control group for incrementality: simple holdout 10%
-    eligible=funnel.get("eligible",0)
-    # incremental = revenue - (control revenue estimate)
-    # Simplified
+    # Phase 8: treatment/control holdout 10%
+    eligible=funnel.get("eligible", funnel.get("exposed",0)*1.1 if funnel.get("exposed") else 100)
+    eligible=int(eligible)
+    control_size=int(eligible*0.10)
+    treatment_size=eligible - control_size
+    # funnel keys: exposed, viewed, clicked, added, purchased, revenue_paise
+    exposed=funnel.get("exposed", treatment_size)
+    purchased=funnel.get("purchased", funnel.get("conversions",0))
+    revenue=funnel.get("revenue_paise", funnel.get("revenue",0))
+    # control group expected conversions: apply control conversion rate (assume 2% baseline)
+    control_conv_rate=0.02  # baseline; in prod derive from historical
+    control_conversions=int(control_size * control_conv_rate)
+    control_revenue=int(control_conversions * (revenue/max(purchased,1) if purchased else 50000))
+    # incremental metrics
+    incremental_conversions=purchased - control_conversions
+    incremental_revenue=revenue - control_revenue
+    # uplift vs control
+    uplift_pct = (incremental_revenue / max(control_revenue,1)*100) if control_revenue else 0
+    met=CampaignMetric(campaign_id=camp.id, impressions=exposed, conversions=purchased, revenue_paise=revenue, uplift_paise=incremental_revenue)
+    # store incrementality in uplift field + payload via CampaignAction if needed
+    db.add(met); db.commit(); db.refresh(met)
+    # attach incrementality details to metric via separate dict return
+    met.incremental_conversions=incremental_conversions
+    met.control_conversions=control_conversions
+    met.control_revenue=control_revenue
+    met.uplift_pct=round(uplift_pct,1)
     return met
 
 def learning_update(db: Session, merchant_id: str="m_demo"):
