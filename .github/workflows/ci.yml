@@ -19,6 +19,7 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
       - run: pip install -r backend/requirements.txt
+      - run: pip install pytest
       - run: python -m py_compile backend/app/main.py backend/app/services/commerce.py backend/app/api/routes/products.py
       - run: python backend/scripts/seed_realistic.py --seed 42  # deterministic CSV
       - run: sha256sum data/products.csv | grep 81445a562d13cceb197137b3499481badc1a9131de67088c6ed4abf1c5512726
