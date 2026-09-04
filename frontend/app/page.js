@@ -32,7 +32,7 @@ export default function Page(){
  return (
   <div className="min-h-screen bg-[#fafafa] text-gray-900 font-sans p-6">
    <div className="max-w-6xl mx-auto space-y-6">
-    {/* Header */}
+    {/* TOP — Health + Controls + KPIs */}
     <div className="flex justify-between items-center pb-4 border-b border-gray-200">
      <div>
       <h1 className="text-2xl font-black tracking-tight text-gray-900">MAG GROWTH CONTROL CENTER</h1>
@@ -67,6 +67,7 @@ export default function Page(){
     </div>
 
     {/* Opportunities Section */}
+    {/* CENTER — Scored Opportunities + Explain */}
     <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
      <div className="flex justify-between items-end mb-4">
       <h2 className="text-lg font-bold text-gray-900 tracking-tight">Opportunities <span className="ml-2 px-2 py-1 bg-gray-100 text-gray-600 rounded-lg text-xs">{opps.length} detected</span></h2>
@@ -163,6 +164,7 @@ export default function Page(){
     </div>
 
     {/* Campaigns */}
+    {/* BOTTOM — Campaigns + Agent Runs (18-step final acceptance) */}
     <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
      <h3 className="text-sm font-bold tracking-tight text-gray-900 uppercase mb-4">Active Campaigns</h3>
      {campaigns.length === 0 ? (
