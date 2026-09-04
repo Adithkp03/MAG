@@ -1,0 +1,8 @@
+{
+  "seed": 42,
+  "merchants": 2,
+  "products": 42,
+  "customers": 180,
+  "orders": 742,
+  "items": 967
+}
