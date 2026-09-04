@@ -1,4 +1,3 @@
-
 import json
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
@@ -8,17 +7,17 @@ from ..services.growth_intelligence import compute_product_metrics, compute_cust
 from .groq_client import get_groq_client
 from ..core.tracing import start_span, end_span
 
-GROWTH_SYSTEM = """You are Growth Agent for Merchant Autonomous Growth. Find evidence-based opportunities.
+GROWTH_SYSTEM = """You are Growth Agent for Merchant Autonomous Growth. Find evidence-based opportunities for the AUTHENTICATED merchant only.
 
-Tools:
+Tools (all require merchant_id from authenticated context — never invent or guess):
 - get_revenue_metrics(merchant_id): total revenue, AOV, conversion, order count
 - get_product_metrics(merchant_id): per-product conversion/attach/stock
 - find_growth_opportunities(merchant_id): low attach high stock gaps
 - get_cross_sell_candidates(category, merchant_id): ranked candidates with affinity evidence
-- estimate_campaign(target_category, discount): expected revenue impact from history
+- estimate_campaign(target_category, discount, merchant_id): expected revenue impact from history
 
-CRITICAL: merchant_id is ALWAYS "m_demo" - never use merchant_123 or any other ID.
-Workflow: Always start with get_revenue_metrics with merchant_id="m_demo", then get_product_metrics or find_growth_opportunities, then get_cross_sell_candidates for top gap, then estimate_campaign. Always cite numbers: attach 57% vs baseline, orders 12, etc. Never invent. Propose one concrete campaign.
+CRITICAL: merchant_id MUST come from the authenticated principal passed to you. Never invent, never force m_demo, never use merchant_123. The server will override any hallucinated merchant_id with the authenticated one. Use the merchant_id supplied in the first tool call.
+Workflow: Always start with get_revenue_metrics with the authenticated merchant_id, then get_product_metrics or find_growth_opportunities, then get_cross_sell_candidates for top gap, then estimate_campaign. Always cite numbers: attach vs baseline, orders, etc. Never invent. Propose one concrete campaign.
 """
 
 GROWTH_TOOLS = [
@@ -26,15 +25,18 @@ GROWTH_TOOLS = [
     {"type":"function","function":{"name":"get_product_metrics","description":"Per-product conversion and attach","parameters":{"type":"object","properties":{"merchant_id":{"type":"string"}},"required":["merchant_id"]}}},
     {"type":"function","function":{"name":"find_growth_opportunities","description":"Find low attach high stock opportunities","parameters":{"type":"object","properties":{"merchant_id":{"type":"string"}},"required":["merchant_id"]}}},
     {"type":"function","function":{"name":"get_cross_sell_candidates","description":"Ranked cross-sell with evidence","parameters":{"type":"object","properties":{"category":{"type":"string"},"merchant_id":{"type":"string"}},"required":["category"]}}},
-    {"type":"function","function":{"name":"estimate_campaign","description":"Estimate campaign impact","parameters":{"type":"object","properties":{"target_category":{"type":"string"},"discount":{"type":"integer"}},"required":["target_category"]}}},
+    {"type":"function","function":{"name":"estimate_campaign","description":"Estimate campaign impact","parameters":{"type":"object","properties":{"target_category":{"type":"string"},"discount":{"type":"integer"},"merchant_id":{"type":"string"}},"required":["target_category"]}}},
 ]
 
-def growth_gateway(db: Session, tool: str, args: dict):
-    mid=args.get("merchant_id","m_demo")
-    # force to m_demo if hallucinated
+def growth_gateway(db: Session, tool: str, args: dict, authenticated_merchant_id: str = None):
+    # Tenant isolation: authenticated merchant is source of truth
+    mid = authenticated_merchant_id or args.get("merchant_id")
+    if not mid:
+        return {"error": "merchant_id required from authenticated context", "policy": {"allowed": False}}
+    # Validate merchant exists — do not silently fallback to m_demo
     from ..models.entities import Merchant
     if not db.query(Merchant).filter(Merchant.id==mid).first():
-        mid="m_demo"
+        return {"error": f"unknown merchant {mid}", "policy": {"allowed": False}}
     if tool=="get_revenue_metrics":
         row=db.execute(text("""
             SELECT COUNT(*) as cnt, COALESCE(SUM(total),0) as rev, COALESCE(AVG(total),0) as aov
@@ -49,7 +51,6 @@ def growth_gateway(db: Session, tool: str, args: dict):
             FROM products p LEFT JOIN cart_items ci ON ci.product_id=p.id LEFT JOIN carts c ON ci.cart_id=c.id LEFT JOIN checkouts ch ON ch.cart_id=c.id LEFT JOIN orders o ON o.checkout_id=ch.id
             WHERE p.merchant_id=:mid GROUP BY p.category
         """), {"mid": mid}).mappings().all()
-        # use real pipeline for opportunities
         from ..services.growth_intelligence import compute_product_metrics as cpm
         data=cpm(db, mid)
         opps=[]
@@ -63,20 +64,18 @@ def growth_gateway(db: Session, tool: str, args: dict):
         return {"output": {"category": cat, "candidates": cands}}
     elif tool=="estimate_campaign":
         cat=args.get("target_category","keyboard"); disc=args.get("discount",10)
-        # estimate: orders_with_category * attach * discount lift
-        data=compute_product_metrics(db, "m_demo")
+        data=compute_product_metrics(db, mid)
         base=next((m for m in data["metrics"] if m["category"].lower()==cat.lower()), None)
         if not base:
             return {"output": {"estimated_lift": "unknown", "reason": "no history"}}
-        # simple model: attach 0.57 * orders 7 * avg price 799 * discount factor
-        lift_orders = int(base["orders_with_category"] * 0.3)  # 30% of buyers add cross-sell with campaign
-        avg_price=79900  # mouse price
+        lift_orders = int(base["orders_with_category"] * 0.3)
+        avg_price=79900
         incremental = lift_orders * avg_price * (1 - disc/100)
         return {"output": {"target": cat, "discount": disc, "base_orders": base["orders_with_category"], "estimated_incremental_paise": int(incremental), "estimated_incremental_inr": round(incremental/100,2), "reason": f"{lift_orders} incremental adds from {base['orders_with_category']} base orders at {disc}% discount"}}
     else:
         return {"error": f"unknown {tool}"}
 
-def run_growth_agent(db: Session, merchant_id: str="m_demo", user_message: str="Find growth opportunities"):
+def run_growth_agent(db: Session, merchant_id: str, user_message: str="Find growth opportunities"):
     client=get_groq_client()
     sess=db.query(AgentSession).filter(AgentSession.merchant_id==merchant_id).first()
     if not sess:
@@ -85,7 +84,7 @@ def run_growth_agent(db: Session, merchant_id: str="m_demo", user_message: str="
     db.add(run); db.commit(); db.refresh(run)
     db.add(AgentMessage(run_id=run.id, session_id=sess.id, role="user", content=user_message)); db.commit()
     if not client:
-        out=growth_gateway(db, "find_growth_opportunities", {"merchant_id": merchant_id})
+        out=growth_gateway(db, "find_growth_opportunities", {"merchant_id": merchant_id}, authenticated_merchant_id=merchant_id)
         run.final_reply=str(out["output"]); run.status="completed"; run.completed_at=datetime.utcnow(); db.commit()
         return {"run": run, "tool_calls": [], "fallback": True}
     messages=[{"role":"system","content": GROWTH_SYSTEM}, {"role":"user","content": user_message}]
@@ -104,7 +103,7 @@ def run_growth_agent(db: Session, merchant_id: str="m_demo", user_message: str="
             try: args=json.loads(tc.function.arguments or "{}")
             except: args={}
             tspan=start_span(f"tool:{fname}")
-            res=growth_gateway(db, fname, args)
+            res=growth_gateway(db, fname, args, authenticated_merchant_id=merchant_id)
             end_span(tspan)
             tcr=AgentToolCall(run_id=run.id, session_id=sess.id, tool=fname, input=args, output=res)
             db.add(tcr); db.commit()
