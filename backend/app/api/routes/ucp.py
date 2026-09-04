@@ -49,6 +49,7 @@ def ucp_create_checkout(payload: dict, db: Session = Depends(get_db)):
     customer_id=payload.get("customer_id","cust_demo")
     items=payload.get("items", [])
     idempotency_key=payload.get("idempotency_key")
+    continue_url=payload.get("continue_url") or payload.get("continueUrl")  # Phase 16 UCP continue_url
     # create cart via core
     cart=Cart(merchant_id=merchant_id, customer_id=customer_id, status="active", total=0)
     db.add(cart); db.flush()
@@ -76,7 +77,9 @@ def ucp_create_checkout(payload: dict, db: Session = Depends(get_db)):
         chk=res["checkout"] if isinstance(res, dict) and "checkout" in res else res
         # chk is ORM object
         ucp=_to_ucp_checkout(chk, db)
-        return {"checkout": ucp, "cart_id": cart.id, "order": res.get("order"), "policy": res.get("policy"), "via": "ucp_adapter"}
+        # Phase 16: include continue_url in response if provided
+        if continue_url: ucp["continue_url"]=continue_url
+        return {"checkout": ucp, "cart_id": cart.id, "order": res.get("order"), "policy": res.get("policy"), "via": "ucp_adapter", "continue_url": continue_url}
     except HTTPException as e:
         # map 402 blocked to UCP escalation shape with trusted UI hint
         if e.status_code==402:
