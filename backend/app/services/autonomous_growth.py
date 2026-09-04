@@ -429,14 +429,15 @@ def execute_campaign(db: Session, campaign_id: str):
     return {"campaign": camp, "funnel": funnel, "metric": met, "incremental_revenue": getattr(met,'uplift_paise',0), "incremental_conversions": getattr(met,'incremental_conversions',0)}
 
 def learning_update(db: Session, merchant_id: str="m_demo"):
-    """Learning loop: update confidence based on outcome vs expected"""
+    """Learning loop: Bayesian/bandit update with observations/successes/CI (Phase 15)"""
     from ..models.entities import Campaign, CampaignMetric, Opportunity
-    camps=db.query(Campaign).filter(Campaign.merchant_id==merchant_id, Campaign.status=="active").all()
+    camps=db.query(Campaign).filter(Campaign.merchant_id==merchant_id).all()
     updates=[]
     for camp in camps:
         mets=db.query(CampaignMetric).filter(CampaignMetric.campaign_id==camp.id).all()
         total_rev=sum(m.revenue_paise for m in mets)
         total_conv=sum(m.conversions for m in mets)
+        impressions=sum(m.impressions for m in mets) or 1
         # find opp
         from ..models.entities import CampaignAction
         act=db.query(CampaignAction).filter(CampaignAction.campaign_id==camp.id).first()
@@ -444,14 +445,24 @@ def learning_update(db: Session, merchant_id: str="m_demo"):
         if opp_id:
             opp=db.query(Opportunity).filter(Opportunity.id==opp_id).first()
             if opp:
-                # update confidence: if actual close to expected, increase
-                expected=opp.expected_revenue or 1
-                ratio=total_rev/max(expected,1)
-                if 0.8<=ratio<=1.2:
-                    opp.confidence=min(0.95, opp.confidence+0.05)
-                elif ratio<0.5:
-                    opp.confidence=max(0.3, opp.confidence-0.1)
-                updates.append({"opportunity": opp.id, "old_conf": opp.confidence, "ratio": round(ratio,2)})
+                # Bayesian: prior Beta(2,2), posterior Beta(successes+2, failures+2) where success = converted impressions
+                successes=total_conv; failures=max(0, impressions - successes)
+                alpha=successes+2; beta=failures+2
+                posterior_mean=alpha/(alpha+beta)
+                # 95% CI via normal approx
+                import math
+                var=alpha*beta/((alpha+beta)**2*(alpha+beta+1))
+                ci_low=max(0, posterior_mean - 1.96*math.sqrt(var))
+                ci_high=min(1, posterior_mean + 1.96*math.sqrt(var))
+                # update confidence as posterior mean (with damping)
+                old=opp.confidence
+                opp.confidence=round(0.7*old + 0.3*posterior_mean,3)
+                # store observations in evidence for audit
+                ev=opp.evidence or {}
+                ev["observations"]=impressions; ev["successes"]=successes; ev["failures"]=failures
+                ev["posterior_alpha"]=alpha; ev["posterior_beta"]=beta; ev["ci_95"]=[round(ci_low,3), round(ci_high,3)]
+                opp.evidence=ev
+                updates.append({"opportunity": opp.id, "old_conf": old, "new_conf": opp.confidence, "posterior_mean": round(posterior_mean,3), "ci": [round(ci_low,3), round(ci_high,3)], "obs": impressions, "successes": successes})
     db.commit()
     return updates
 
