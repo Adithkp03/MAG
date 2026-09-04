@@ -62,7 +62,10 @@ def propose(body: ProposeIn, db: Session = Depends(get_db), merchant=Depends(req
 def approve(campaign_id: str, approved_by: str = Header(None, alias="X-Approved-By"), db: Session = Depends(get_db)):
     camp=db.query(Campaign).filter(Campaign.id==campaign_id).first()
     if not camp: raise HTTPException(status_code=404, detail={"code":"not_found","message":"campaign not found"})
-    if camp.status!="proposed": raise HTTPException(status_code=409, detail={"code":"invalid_state","message":f"campaign already {camp.status}"})
+    # HITL resumable: PROPOSED/AWAITING -> APPROVED, idempotent if already approved
+    if camp.status=="approved": return {"campaign_id": camp.id, "status": camp.status, "approved_by": camp.approved_by, "note": "already approved (idempotent)"}
+    if camp.status not in ("proposed","awaiting_approval"):
+        raise HTTPException(status_code=409, detail={"code":"invalid_state","message":f"campaign status {camp.status} not approvable (expected proposed/awaiting_approval)"})
     if not approved_by: raise HTTPException(status_code=422, detail={"code":"validation_error","message":"X-Approved-By header required"})
     camp.status="approved"
     camp.approved_by=approved_by; camp.approved_at=datetime.utcnow()
@@ -71,21 +74,41 @@ def approve(campaign_id: str, approved_by: str = Header(None, alias="X-Approved-
     db.commit()
     return {"campaign_id": camp.id, "status": camp.status, "approved_by": approved_by}
 
+@router.post("/{campaign_id}/reject")
+def reject(campaign_id: str, reason: str="rejected", approved_by: str = Header(None, alias="X-Approved-By"), db: Session = Depends(get_db)):
+    camp=db.query(Campaign).filter(Campaign.id==campaign_id).first()
+    if not camp: raise HTTPException(status_code=404, detail={"code":"not_found","message":"campaign not found"})
+    if camp.status not in ("proposed","awaiting_approval"):
+        raise HTTPException(status_code=409, detail={"code":"invalid_state","message":f"campaign status {camp.status} not rejectable"})
+    camp.status="rejected"
+    camp.approved_by=approved_by; camp.approved_at=datetime.utcnow()
+    db.commit()
+    return {"campaign_id": camp.id, "status": camp.status}
+
 @router.post("/{campaign_id}/execute")
 def execute(campaign_id: str, db: Session = Depends(get_db), merchant=Depends(require_merchant_auth)):
     camp=db.query(Campaign).filter(Campaign.id==campaign_id).first()
     if not camp: raise HTTPException(status_code=404, detail={"code":"not_found","message":"campaign not found"})
-    if camp.status!="approved": raise HTTPException(status_code=409, detail={"code":"invalid_state","message":"campaign must be approved before execute"})
+    # Phase 13: PROPOSED->awaiting_approval->APPROVED->EXECUTING->COMPLETED
+    if camp.status=="proposed":
+        # auto-transition to awaiting_approval for HITL visibility
+        camp.status="awaiting_approval"; db.commit()
+        raise HTTPException(status_code=409, detail={"code":"awaiting_approval","message":"campaign requires approval before execute (PROPOSED->AWAITING_APPROVAL). Call /approve with X-Approved-By."})
+    if camp.status=="awaiting_approval":
+        raise HTTPException(status_code=409, detail={"code":"awaiting_approval","message":"campaign awaiting approval"})
+    if camp.status not in ("approved","executing"):
+        raise HTTPException(status_code=409, detail={"code":"invalid_state","message":f"campaign status {camp.status} not executable (expected approved)"})
+    camp.status="executing"
     run=CampaignRun(campaign_id=camp.id, status="running")
     db.add(run); db.flush()
-    camp.status="active"
     try: publish("campaign.executed", {"campaign_id": camp.id, "run_id": run.id})
     except: pass
     db.commit()
+    # simulate execution then complete
     met=CampaignMetric(campaign_id=camp.id, run_id=run.id, impressions=0, conversions=0, revenue_paise=0, uplift_paise=0)
     db.add(met); db.commit()
-    run.status="completed"; run.ended_at=datetime.utcnow(); db.commit()
-    return {"campaign_id": camp.id, "run_id": run.id, "status": camp.status, "message":"campaign activated"}
+    camp.status="completed"; run.status="completed"; run.ended_at=datetime.utcnow(); db.commit()
+    return {"campaign_id": camp.id, "run_id": run.id, "status": camp.status, "message":"campaign executed (EXECUTING->COMPLETED, resumable via metric)"}
 
 @router.get("")
 def list_campaigns(merchant_id: str="m_demo", db: Session = Depends(get_db), merchant=Depends(require_merchant_auth)):
