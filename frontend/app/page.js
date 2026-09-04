@@ -22,11 +22,13 @@ export default function Page(){
  useEffect(()=>{ load(); },[]);
  async function runMAG(){
   setRunning(true);
-  let r=await safeFetch(API+"/api/v1/autonomous/run?merchant_id=m_demo",{method:"POST",headers:{"X-Merchant-Id":"m_demo","Content-Type":"application/json"}});
-  if(!r.ok){
-   await safeFetch(API+"/api/v1/opportunities/detect?merchant_id=m_demo",{method:"POST",headers:{"X-Merchant-Id":"m_demo"}});
-  }
-  await load(); setRunning(false);
+  try{
+   let r=await safeFetch(API+"/api/v1/autonomous/run?merchant_id=m_demo",{method:"POST",headers:{"X-Merchant-Id":"m_demo","Content-Type":"application/json"}});
+   if(!r.ok){
+    await safeFetch(API+"/api/v1/opportunities/detect?merchant_id=m_demo",{method:"POST",headers:{"X-Merchant-Id":"m_demo"}});
+   }
+   await load();
+  } finally { setRunning(false); }
  }
  async function doExplain(id){ const r=await safeFetch(API+"/api/v1/explain/"+id); if(r.ok) setExplain(r.data); }
  async function planOpp(id){ const r=await safeFetch(API+"/api/v1/opportunities/"+id+"/plan",{method:"POST",headers:{"X-Merchant-Id":"m_demo"}}); await load(); alert(r.ok? "Planned "+(r.data.campaign_id||""): JSON.stringify(r.data)); }
