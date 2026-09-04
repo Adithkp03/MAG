@@ -45,7 +45,9 @@ def ucp_create_checkout(payload: dict, db: Session = Depends(get_db)):
     """UCP Adapter: create -> delegates to internal Cart+Checkout core, no duplicate logic."""
     from .checkout import create_checkout
     from ...schemas import CheckoutCreate
-    merchant_id=payload.get("merchant_id","m_demo")
+    merchant_id = payload.get("merchant_id")
+    if not merchant_id:
+        raise HTTPException(status_code=400, detail="merchant_id required in payload")
     customer_id=payload.get("customer_id","cust_demo")
     items=payload.get("items", [])
     idempotency_key=payload.get("idempotency_key")

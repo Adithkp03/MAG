@@ -13,7 +13,11 @@ import uuid
 router = APIRouter(prefix="/payments", tags=["payments"])
 
 @router.post("", responses={409: {"model": ErrorResponse}})
-async def create_payment(payload: PaymentCreate, db: Session = Depends(get_db), idempotency_key: str = Header(None, alias="Idempotency-Key")):
+async def create_payment(payload: PaymentCreate, db: Session = Depends(get_db), merchant_id: str = Depends(require_merchant_auth), idempotency_key: str = Header(None, alias="Idempotency-Key")):
+    # merchant_id is now authenticated — ignore payload.merchant_id mismatch
+    if payload.merchant_id and payload.merchant_id != merchant_id:
+        raise HTTPException(status_code=403, detail={"code":"merchant_mismatch","message":"payload merchant_id does not match authenticated merchant"})
+    # use authenticated merchant_id as source of truth
     # P0-4 idempotency by header - must be supplied for financial calls, generate server-side if missing but warn
     if not idempotency_key:
         idempotency_key = f"pay_{uuid.uuid4().hex[:8]}"
@@ -27,13 +31,15 @@ async def create_payment(payload: PaymentCreate, db: Session = Depends(get_db), 
         order = db.query(Order).filter(Order.id==payload.order_id).first()
         if not order:
             raise HTTPException(status_code=404, detail={"code":"order_not_found","message":"order not found"})
+        if order.merchant_id != merchant_id:
+            raise HTTPException(status_code=403, detail={"code":"order_merchant_mismatch","message":"order does not belong to authenticated merchant"})
         amount = order.total
     if amount is None:
         raise HTTPException(status_code=422, detail={"code":"amount_required","message":"amount required if order_id not supplied"})
     receipt = f"rcpt_{payload.order_id or idempotency_key}"[:40]
-    rzp_order = await create_razorpay_order(amount, receipt, notes={"order_id": payload.order_id or "", "merchant_id": payload.merchant_id or (order.merchant_id if order else "m_demo")})
+    rzp_order = await create_razorpay_order(amount, receipt, notes={"order_id": payload.order_id or "", "merchant_id": merchant_id})
     # razorpay_order_id unique enforces correlation P0-3
-    pay = Payment(order_id=payload.order_id, merchant_id=payload.merchant_id or (order.merchant_id if order else "m_demo"), amount=amount, status="created", razorpay_order_id=rzp_order.get("id"), idempotency_key=idempotency_key)
+    pay = Payment(order_id=payload.order_id, merchant_id=merchant_id, amount=amount, status="created", razorpay_order_id=rzp_order.get("id"), idempotency_key=idempotency_key)
     try:
         db.add(pay)
         if order:

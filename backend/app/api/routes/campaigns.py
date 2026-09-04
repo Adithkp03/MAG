@@ -13,7 +13,7 @@ from sqlalchemy import text as sql_text
 router=APIRouter(prefix="/api/v1/campaigns", tags=["campaigns"])
 
 class ProposeIn(BaseModel):
-    merchant_id: str = "m_demo"
+    merchant_id: str = Depends(require_merchant_auth)
     target_category: str
     discount: int = 10
     trigger_product_id: Optional[str] = None
@@ -111,7 +111,7 @@ def execute(campaign_id: str, db: Session = Depends(get_db), merchant=Depends(re
     return {"campaign_id": camp.id, "run_id": run.id, "status": camp.status, "message":"campaign executed (EXECUTING->COMPLETED, resumable via metric)"}
 
 @router.get("")
-def list_campaigns(merchant_id: str="m_demo", db: Session = Depends(get_db), merchant=Depends(require_merchant_auth)):
+def list_campaigns(merchant_id: str = Depends(require_merchant_auth), db: Session = Depends(get_db), merchant=Depends(require_merchant_auth)):
     rows=db.query(Campaign).filter(Campaign.merchant_id==merchant_id).order_by(Campaign.created_at.desc()).all()
     return {"campaigns": [{"id": c.id, "name": c.name, "target": c.target_category, "discount": c.discount, "status": c.status, "expected_inr": round(c.expected_incremental_paise/100,2), "reason": c.proposal_reason} for c in rows]}
 

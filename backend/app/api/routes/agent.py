@@ -14,7 +14,9 @@ router = APIRouter(prefix="/agent", tags=["agent"])
 
 @router.post("/chat")
 def chat(payload: dict, db: Session = Depends(get_db)):
-    merchant_id = payload.get("merchant_id","m_demo")
+    merchant_id = payload.get("merchant_id")
+    if not merchant_id:
+        raise HTTPException(status_code=400, detail="merchant_id required in payload")
     customer_id = payload.get("customer_id")
     message = payload.get("message","")
     session_id = payload.get("session_id")
@@ -83,7 +85,9 @@ def session_audit(session_id: str, db: Session = Depends(get_db)):
 @router.post("/run", tags=["agent"])
 def agent_run(payload: dict, db: Session = Depends(get_db)):
     from ...agent.runtime import run_agent
-    merchant_id=payload.get("merchant_id","m_demo")
+    merchant_id = payload.get("merchant_id")
+    if not merchant_id:
+        raise HTTPException(status_code=400, detail="merchant_id required in payload")
     customer_id=payload.get("customer_id")
     message=payload.get("message","")
     session_id=payload.get("session_id")

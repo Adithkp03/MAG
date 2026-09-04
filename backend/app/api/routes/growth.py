@@ -8,24 +8,24 @@ from ...services.growth_intelligence import compute_product_metrics, compute_cus
 router = APIRouter(prefix="/growth", tags=["growth"])
 
 @router.get("/metrics/products")
-def product_metrics(merchant_id: str="m_demo", db: Session = Depends(get_db)):
+def product_metrics(merchant_id: str = Depends(require_merchant_auth), db: Session = Depends(get_db)):
     return compute_product_metrics(db, merchant_id)
 
 @router.get("/metrics/customers")
-def customer_metrics(merchant_id: str="m_demo", db: Session = Depends(get_db)):
+def customer_metrics(merchant_id: str = Depends(require_merchant_auth), db: Session = Depends(get_db)):
     return compute_customer_metrics(db, merchant_id)
 
 @router.get("/co-purchase")
-def co_purchase(merchant_id: str="m_demo", db: Session = Depends(get_db)):
+def co_purchase(merchant_id: str = Depends(require_merchant_auth), db: Session = Depends(get_db)):
     rows=get_order_history(db, merchant_id, 1000)
     return compute_co_purchase(rows)
 
 @router.get("/rank")
-def rank(category: str, merchant_id: str="m_demo", limit: int=3, db: Session = Depends(get_db)):
+def rank(category: str, merchant_id: str = Depends(require_merchant_auth), limit: int=3, db: Session = Depends(get_db)):
     return {"category": category, "candidates": rank_candidates(db, category, merchant_id, limit)}
 
 @router.get("/opportunities")
-def opportunities(merchant_id: str="m_demo", db: Session = Depends(get_db)):
+def opportunities(merchant_id: str = Depends(require_merchant_auth), db: Session = Depends(get_db)):
     """P2 real opportunity detection: Orders -> Profiles -> Affinity gaps -> Expected revenue"""
     data=compute_product_metrics(db, merchant_id)
     co=data.get("co_purchase", {})
@@ -72,7 +72,7 @@ def opportunities(merchant_id: str="m_demo", db: Session = Depends(get_db)):
     return {"opportunities": opps[:5], "order_count": order_count, "pipeline": "Orders -> Feature Engineering -> Profiles -> Candidate Generation -> Ranking -> Policy Constraints -> Expected Revenue -> Recommendation -> Outcome Tracking"}
 
 @router.get("/intelligence")
-def intelligence(merchant_id: str="m_demo", db: Session = Depends(get_db)):
+def intelligence(merchant_id: str = Depends(require_merchant_auth), db: Session = Depends(get_db)):
     """Full intelligence snapshot for growth agent"""
     prod=compute_product_metrics(db, merchant_id)
     cust=compute_customer_metrics(db, merchant_id)

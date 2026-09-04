@@ -82,7 +82,7 @@ async def razorpay_webhook(request: Request, db: Session = Depends(get_db)):
                 chk=db.query(Checkout).filter(Checkout.id==ord.checkout_id).first() if ord else None
                 if chk and chk.can_transition("failed"): chk.status="failed"
             db.commit()
-            ae=AuditEvent(merchant_id=pay.merchant_id or "m_demo", action="webhook_payment_failed", amount=pay.amount, policy_result="n/a", authorization="n/a", result="failed", reason=event_type, payload={"event_id": event_id, "payment_id": pay.id, "live_status": live_status})
+            ae=AuditEvent(merchant_id=pay.merchant_id, action="webhook_payment_failed", amount=pay.amount, policy_result="n/a", authorization="n/a", result="failed", reason=event_type, payload={"event_id": event_id, "payment_id": pay.id, "live_status": live_status})
             db.add(ae); we.processed=True; db.commit()
             publish("payment.failed", {"payment_id": pay.id})
             end_span(wspan, attrs={"result":"failed", "live_status": str(live_status)})
@@ -101,7 +101,7 @@ async def razorpay_webhook(request: Request, db: Session = Depends(get_db)):
                     end_span(wspan, status="error", attrs={"result":"invalid_state"})
                     raise HTTPException(status_code=409, detail={"code":"invalid_state_transition","message": f"cannot transition {chk.status} -> captured"})
         db.commit()
-        ae=AuditEvent(merchant_id=pay.merchant_id or "m_demo", action="webhook_payment_captured", amount=pay.amount, policy_result="n/a", authorization="n/a", result="captured", reason=event_type, payload={"event_id": event_id, "payment_id": pay.id, "razorpay_order_id": razorpay_order_id, "live_status": live_status})
+        ae=AuditEvent(merchant_id=pay.merchant_id, action="webhook_payment_captured", amount=pay.amount, policy_result="n/a", authorization="n/a", result="captured", reason=event_type, payload={"event_id": event_id, "payment_id": pay.id, "razorpay_order_id": razorpay_order_id, "live_status": live_status})
         db.add(ae); we.processed=True; db.commit()
         publish("payment.captured", {"payment_id": pay.id})
         publish("order.paid", {"order_id": pay.order_id, "payment_id": pay.id})

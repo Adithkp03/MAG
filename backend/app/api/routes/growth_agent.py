@@ -6,7 +6,7 @@ from ...core.database import get_db
 from ...agent.growth_runtime import run_growth_agent
 router=APIRouter(prefix="/api/v1/growth-agent", tags=["growth-agent"])
 class GrowthRunIn(BaseModel):
-    merchant_id: str = "m_demo"
+    merchant_id: str = Depends(require_merchant_auth)
     message: str = "Find the best growth opportunity for this merchant and estimate campaign impact"
 @router.post("/run")
 def growth_run(body: GrowthRunIn, db: Session = Depends(get_db)):

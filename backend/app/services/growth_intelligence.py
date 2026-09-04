@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from datetime import datetime, timedelta
 
-def get_order_history(db: Session, merchant_id: str = "m_demo", limit: int = 1000):
+def get_order_history(db: Session, merchant_id: str, limit: int = 1000):
     # Join orders -> checkouts -> carts -> cart_items -> products to build co-purchase
     q = text("""
         SELECT o.id as order_id, o.status, o.total, o.created_at,
@@ -43,7 +43,7 @@ def compute_co_purchase(rows):
         affinity[f"{b}->{a}"] = cnt / single_counts[b] if single_counts[b] else 0
     return {"pair_counts": dict(pair_counts), "single_counts": dict(single_counts), "affinity": affinity, "order_count": len(order_items)}
 
-def compute_product_metrics(db: Session, merchant_id: str = "m_demo"):
+def compute_product_metrics(db: Session, merchant_id: str):
     rows = get_order_history(db, merchant_id, 1000)
     stats = compute_co_purchase(rows)
     # also inventory/margin from products table

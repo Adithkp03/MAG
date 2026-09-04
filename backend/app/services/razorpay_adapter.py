@@ -28,8 +28,14 @@ async def fetch_payment(payment_id: str):
 
 def verify_webhook_signature(body: bytes, signature: str) -> bool:
     secret = settings.razorpay_webhook_secret or ""
-    if not secret or "xxx" in secret or not signature:
-        return True  # allow in dev if no secret configured (warn)
+    if not secret or "xxx" in secret:
+        # Fix #9: in production missing secret = fail (was True -> bypass). In dev, allow but warn
+        if settings.env == "production":
+            return False
+        # dev: allow missing sig when no secret configured
+        return True if not signature else True
+    if not signature:
+        return False
     expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, signature)
 

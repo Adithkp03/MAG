@@ -10,9 +10,7 @@ def require_merchant_auth(x_merchant_id: str = Header(None, alias="X-Merchant-Id
     Env MERCHANT_AUTH_STRICT=1 enforces (for final deploy). Dev allows m_demo fallback but logs."""
     strict = os.getenv("MERCHANT_AUTH_STRICT", "0") == "1"
     if not x_merchant_id:
-        if strict:
-            raise HTTPException(status_code=401, detail={"code":"merchant_auth_required","message":"X-Merchant-Id required"})
-        return "m_demo"
+        raise HTTPException(status_code=401, detail={"code":"merchant_auth_required","message":"X-Merchant-Id required — no default (was m_demo)"})
     m = db.query(Merchant).filter(Merchant.id==x_merchant_id).first()
     if not m:
         raise HTTPException(status_code=401, detail={"code":"merchant_not_found","message":"unknown merchant"})
@@ -32,5 +30,10 @@ def require_merchant_auth(x_merchant_id: str = Header(None, alias="X-Merchant-Id
 def require_merchant(x_merchant_id: str = Header(None, alias="X-Merchant-Id"), x_api_key: str = Header(None, alias="X-API-Key"), db: Session = Depends(get_db)):
     return require_merchant_auth(x_merchant_id, x_api_key, db)
 
-def optional_merchant(x_merchant_id: str = Header(None, alias="X-Merchant-Id")):
-    return x_merchant_id or "m_demo"
+def optional_merchant(x_merchant_id: str = Header(None, alias="X-Merchant-Id"), db: Session = Depends(get_db)):
+    if not x_merchant_id:
+        raise HTTPException(status_code=401, detail={"code":"merchant_auth_required","message":"X-Merchant-Id required — no default"})
+    m = db.query(Merchant).filter(Merchant.id==x_merchant_id).first()
+    if not m:
+        raise HTTPException(status_code=401, detail={"code":"merchant_not_found"})
+    return m.id

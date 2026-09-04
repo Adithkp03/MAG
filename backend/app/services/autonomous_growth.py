@@ -123,9 +123,13 @@ def compute_customer_intelligence(db: Session, merchant_id: str="m_demo"):
 def compute_product_intelligence(db: Session, merchant_id: str="m_demo"):
     from ..models.entities import Product, ProductProfile
     prods=db.execute(sql_text("SELECT id, name, category, price, cost_price, stock FROM products WHERE merchant_id=:mid"), {"mid": merchant_id}).mappings().all()
-    # order stats
+    # order stats - computed once
     order_count=db.execute(sql_text("SELECT COUNT(*) as cnt FROM orders WHERE merchant_id=:mid"), {"mid": merchant_id}).mappings().first()["cnt"] or 1
     total_rev=db.execute(sql_text("SELECT COALESCE(SUM(total),0) as rev FROM orders WHERE merchant_id=:mid AND status='paid'"), {"mid": merchant_id}).mappings().first()["rev"] or 1
+    # Fix #6: compute co-purchase metrics ONCE and index (was N+1 inside loop)
+    from .growth_intelligence import compute_product_metrics
+    pm=compute_product_metrics(db, merchant_id)
+    pm_index={m["product_id"]: m for m in pm["metrics"]}
     out=[]
     for p in prods:
         pid=p["id"]
@@ -143,10 +147,8 @@ def compute_product_intelligence(db: Session, merchant_id: str="m_demo"):
             WHERE ci.product_id=:pid AND o.merchant_id=:mid AND o.status='paid'
         """), {"pid": pid, "mid": merchant_id}).mappings().first()["rev"] or 0
         contrib=round(prod_rev/max(total_rev,1),3)
-        # attach rate & conversion from co-purchase
-        from .growth_intelligence import compute_product_metrics
-        pm=compute_product_metrics(db, merchant_id)
-        met=next((m for m in pm["metrics"] if m["product_id"]==pid), None)
+        # attach rate & conversion from co-purchase (indexed, Fix #6)
+        met=pm_index.get(pid)
         attach=met["attach_rate"] if met else 0
         conv=met["conversion_rate"] if met else 0
         # days of inventory

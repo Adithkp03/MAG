@@ -12,15 +12,15 @@ import datetime
 router=APIRouter(prefix="/api/v1")
 
 @router.get("/policy/tiers")
-def policy_tiers(merchant_id: str="m_demo", db: Session=Depends(get_db)):
+def policy_tiers(merchant_id: str = Depends(require_merchant_auth), db: Session=Depends(get_db)):
     row=db.execute(sql("SELECT auto_approve_limit, approval_limit, hard_block_limit, max_discount, max_campaign_budget, max_daily_spend, min_margin_pct FROM policies WHERE merchant_id=:mid"), {"mid": merchant_id}).mappings().first()
     if not row: return {"merchant_id": merchant_id, "error": "no policy"}
     return {"merchant_id": merchant_id, "auto_approve_limit_inr": row["auto_approve_limit"]/100, "approval_limit_inr": row["approval_limit"]/100, "hard_block_limit_inr": row["hard_block_limit"]/100, "max_discount": row["max_discount"], "max_campaign_budget_inr": row["max_campaign_budget"]/100, "max_daily_spend_inr": row["max_daily_spend"]/100, "min_margin_pct": row["min_margin_pct"]}
 
 @router.get("/auth/check")
-def auth_check(identity: str=Depends(require_merchant_auth), merchant_id: str="m_demo"):
+def auth_check(identity: str=Depends(require_merchant_auth), merchant_id: str = Depends(require_merchant_auth)):
     # P2-20 tenant isolation: identity derived from auth, must match merchant_id
-    if identity != merchant_id and merchant_id != "m_demo":
+    if identity != merchant_id:
         # In strict mode, prevent cross-tenant access
         raise HTTPException(status_code=403, detail=f"tenant isolation: identity {identity} cannot access {merchant_id}")
     return {"identity": identity, "merchant_id": merchant_id, "tenant_isolation": "enforced"}
@@ -34,7 +34,7 @@ def outbox_publish(db: Session=Depends(get_db), identity: str=Depends(require_me
     return publish_pending(db)
 
 @router.get("/agents/compare")
-def agents_compare(merchant_id: str="m_demo", db: Session=Depends(get_db)):
+def agents_compare(merchant_id: str = Depends(require_merchant_auth), db: Session=Depends(get_db)):
     from ...models.entities import Opportunity, MerchantObjective
     opps=db.query(Opportunity).filter(Opportunity.merchant_id==merchant_id).order_by(Opportunity.priority.desc()).limit(5).all()
     obj=db.query(MerchantObjective).filter(MerchantObjective.merchant_id==merchant_id).first()
