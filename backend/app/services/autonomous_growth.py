@@ -222,37 +222,63 @@ def detect_opportunities(db: Session, merchant_id: str="m_demo"):
         cands=rank_candidates(db, m["category"], merchant_id, limit=1)
         if cands and cands[0]["affinity"]>0.3:
             cand=cands[0]
-            exp_rev=int(5 * cand["affinity"] * 0.5 * m["price"])  # paise: count*affinity*conv*price
-            exp_margin=int(exp_rev*0.2)
-            add_opp("cross_sell", {"base_category": m["category"], "affinity": cand["affinity"], "order_count": order_count, "attach": m["attach_rate"]}, {"segment": f"{m['category']}_buyers", "count": int(order_count*0.3)}, cand["product"]["id"], f"discount {min(obj.max_discount,8)}% cross-sell", exp_rev, exp_margin, round(cand["affinity"],2), "low", cand["score"])
+            # Phase 6 data-driven: eligible * conv * price * margin
+            rec_prod=next((p for p in prod_intel if p["product_id"]==cand["product"]["id"]), None)
+            rec_price=rec_prod["price"] if rec_prod else cand["product"]["price"]
+            rec_margin=rec_prod["margin_pct"]/100 if rec_prod and rec_prod["margin_pct"] else 0.25
+            eligible=int(order_count*0.3); conv=cand["affinity"]*0.4  # 40% of affinity converts
+            exp_rev=int(eligible * conv * rec_price)
+            exp_margin=int(exp_rev * rec_margin * (1 - min(obj.max_discount,8)/100) - 5000)  # minus campaign cost
+            exp_margin=max(0, exp_margin)
+            add_opp("cross_sell", {"base_category": m["category"], "affinity": cand["affinity"], "order_count": order_count, "attach": m["attach_rate"], "eligible": eligible, "conv": round(conv,3), "rec_price": rec_price, "rec_margin": rec_margin}, {"segment": f"{m['category']}_buyers", "count": eligible}, cand["product"]["id"], f"discount {min(obj.max_discount,8)}% cross-sell", exp_rev, exp_margin, round(cand["affinity"],2), "low", cand["score"])
 
     # 2. Upsell (high AOV customers, recommend higher priced variant)
     high_val=[c for c in cust_intel if c["aov_inr"]>3000 and c["segment"] in ["high_value","champion"]]
     if high_val:
-        # recommend laptop for keyboard buyers
         lap=next((p for p in prod_intel if p["category"]=="laptop"), None)
         if lap:
-            add_opp("upsell", {"high_value_customers": len(high_val), "avg_aov": sum(c["aov_inr"] for c in high_val)/len(high_val)}, {"customer_ids": [c["customer_id"] for c in high_val][:20], "count": len(high_val)}, lap["product_id"], "bundle upsell 5%", 80000*len(high_val), 12000*len(high_val), 0.6, "medium", 0.7)
+            eligible=len(high_val); conv=0.12; price=lap["price"]; margin=lap["margin_pct"]/100
+            exp_rev=int(eligible * conv * price)
+            exp_margin=int(exp_rev * margin * 0.95 - 8000)  # 5% discount + 8k cost
+            exp_margin=max(0, exp_margin)
+            add_opp("upsell", {"high_value_customers": len(high_val), "avg_aov": sum(c["aov_inr"] for c in high_val)/len(high_val), "eligible": eligible, "conv": conv, "price": price, "margin": margin}, {"customer_ids": [c["customer_id"] for c in high_val][:20], "count": len(high_val)}, lap["product_id"], "bundle upsell 5%", exp_rev, exp_margin, 0.6, "medium", 0.7)
 
     # 3. Churn-risk
     churned=[c for c in cust_intel if c["churn_prob"]>0.6]
     if churned:
-        add_opp("churn_risk", {"churned_count": len(churned), "avg_recency": sum(c["recency_days"] for c in churned)/len(churned)}, {"customer_ids": [c["customer_id"] for c in churned][:15], "count": len(churned)}, None, "winback 10% + personalized email", 50000*len(churned), 8000*len(churned), 0.7, "medium", 0.85)
+        # winback: avg order value from churned segment, eligible * conv * price * margin - discount - cost
+        eligible=len(churned); conv=0.08; price=int(sum(c["aov_inr"] for c in churned)/len(churned)*100) if churned else 200000; margin=0.25
+        exp_rev=int(eligible * conv * price)
+        exp_margin=int(exp_rev * margin * 0.90 - 10000)  # 10% discount
+        exp_margin=max(0, exp_margin)
+        add_opp("churn_risk", {"churned_count": len(churned), "avg_recency": sum(c["recency_days"] for c in churned)/len(churned), "eligible": eligible, "conv": conv, "price": price}, {"customer_ids": [c["customer_id"] for c in churned][:15], "count": len(churned)}, None, "winback 10% + personalized email", exp_rev, exp_margin, 0.7, "medium", 0.85)
 
     # 4. Repeat-purchase (customers with freq 1 but recency 30-60)
     repeat=[c for c in cust_intel if c["frequency"]==1 and 30<=c["recency_days"]<=60]
     if repeat:
-        add_opp("repeat_purchase", {"repeat_candidates": len(repeat)}, {"customer_ids": [c["customer_id"] for c in repeat][:15], "count": len(repeat)}, None, "repeat nudge 8%", 30000*len(repeat), 6000*len(repeat), 0.65, "low", 0.6)
+        eligible=len(repeat); conv=0.10; price=int(sum(c["aov_inr"] for c in repeat)/len(repeat)*100) if repeat else 200000; margin=0.25
+        exp_rev=int(eligible * conv * price)
+        exp_margin=int(exp_rev * margin * 0.92 - 6000)
+        exp_margin=max(0, exp_margin)
+        add_opp("repeat_purchase", {"repeat_candidates": len(repeat), "eligible": eligible, "conv": conv}, {"customer_ids": [c["customer_id"] for c in repeat][:15], "count": len(repeat)}, None, "repeat nudge 8%", exp_rev, exp_margin, 0.65, "low", 0.6)
 
     # 5. Dead/slow inventory
     dead=[p for p in prod_intel if p["slow_score"]>0.6 and p["stock"]>20]
     for p in dead[:2]:
-        add_opp("dead_stock", {"doi": p["doi"], "stock": p["stock"], "velocity": p["velocity"]}, {"category": p["category"]}, p["product_id"], "clearance 12% flash", 40000, 5000, 0.5, "low", 0.55)
+        eligible=p["stock"]; conv=0.15; price=p["price"]; margin=p["margin_pct"]/100
+        exp_rev=int(eligible * conv * price)
+        exp_margin=int(exp_rev * margin * 0.88 - 7000)  # 12% clearance discount
+        exp_margin=max(0, exp_margin)
+        add_opp("dead_stock", {"doi": p["doi"], "stock": p["stock"], "velocity": p["velocity"], "eligible": eligible, "conv": conv, "margin": margin}, {"category": p["category"]}, p["product_id"], "clearance 12% flash", exp_rev, exp_margin, 0.5, "low", 0.55)
 
     # 6. High-margin promotion
     highm=[p for p in prod_intel if p["margin_pct"]>=30 and p["stock"]>20]
     for p in highm[:2]:
-        add_opp("high_margin", {"margin": p["margin_pct"], "contrib": p["revenue_contribution"]}, {"category": p["category"]}, p["product_id"], "feature high-margin 5% push", 60000, int(60000*0.3), 0.6, "low", 0.65)
+        eligible=int(order_count*0.2); conv=0.10; price=p["price"]; margin=p["margin_pct"]/100
+        exp_rev=int(eligible * conv * price)
+        exp_margin=int(exp_rev * margin * 0.95 - 6000)
+        exp_margin=max(0, exp_margin)
+        add_opp("high_margin", {"margin": p["margin_pct"], "contrib": p["revenue_contribution"], "eligible": eligible, "conv": conv}, {"category": p["category"]}, p["product_id"], "feature high-margin 5% push", exp_rev, exp_margin, 0.6, "low", 0.65)
 
     # 7. Low-margin warning
     lowm=[p for p in prod_intel if p["margin_pct"]<=15]
@@ -267,13 +293,21 @@ def detect_opportunities(db: Session, merchant_id: str="m_demo"):
     # 9. High-value customer opportunity (champion)
     champ=[c for c in cust_intel if c["segment"]=="champion"]
     if champ:
-        add_opp("high_value", {"champions": len(champ), "avg_clv": sum(c["clv_inr"] for c in champ)/len(champ)}, {"customer_ids": [c["customer_id"] for c in champ][:10], "count": len(champ)}, None, "VIP bundle early access", 100000*len(champ), 20000*len(champ), 0.75, "low", 0.9)
+        eligible=len(champ); conv=0.15; price=int(sum(c["clv_inr"] for c in champ)/len(champ)*100) if champ else 500000; margin=0.30
+        exp_rev=int(eligible * conv * price)
+        exp_margin=int(exp_rev * margin * 0.95 - 12000)
+        exp_margin=max(0, exp_margin)
+        add_opp("high_value", {"champions": len(champ), "avg_clv": sum(c["clv_inr"] for c in champ)/len(champ), "eligible": eligible, "conv": conv}, {"customer_ids": [c["customer_id"] for c in champ][:10], "count": len(champ)}, None, "VIP bundle early access", exp_rev, exp_margin, 0.75, "low", 0.9)
 
     # 10. Abandoned-cart (customers with no orders but have cart - simplified: use churned as proxy)
     # We simulate via churned + high recency
     aband=[c for c in cust_intel if c["recency_days"]>60 and c["frequency"]==1]
     if aband:
-        add_opp("abandoned_cart", {"count": len(aband)}, {"customer_ids": [c["customer_id"] for c in aband][:10], "count": len(aband)}, None, "abandoned recovery 10%", 35000*len(aband), 6000*len(aband), 0.6, "low", 0.62)
+        eligible=len(aband); conv=0.09; price=int(sum(c["aov_inr"] for c in aband)/len(aband)*100) if aband else 200000; margin=0.25
+        exp_rev=int(eligible * conv * price)
+        exp_margin=int(exp_rev * margin * 0.90 - 7000)
+        exp_margin=max(0, exp_margin)
+        add_opp("abandoned_cart", {"count": len(aband), "eligible": eligible, "conv": conv}, {"customer_ids": [c["customer_id"] for c in aband][:10], "count": len(aband)}, None, "abandoned recovery 10%", exp_rev, exp_margin, 0.6, "low", 0.62)
 
     db.commit()
     # Score and return
