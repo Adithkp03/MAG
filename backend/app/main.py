@@ -3,9 +3,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .core.database import Base, engine, SessionLocal
 from .models.entities import Merchant, Customer, Product, Policy
-from .api.routes import products, carts, checkout, orders, trust, webhooks, agent, payments, recommendations, ucp, growth, growth_agent, campaigns, evaluation, workers
+from .api.routes import products, carts, checkout, orders, trust, webhooks, agent, payments, recommendations, ucp, growth, growth_agent, campaigns, evaluation, workers, autonomous, hardening
 
-app = FastAPI(title="Merchant Autonomous Growth & Commerce Agent", version="0.19.0")
+app = FastAPI(title="Merchant Autonomous Growth & Commerce Agent", version="0.21.0")
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
@@ -51,6 +51,14 @@ try:
             "ALTER TABLE policies ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP",
             "ALTER TABLE checkouts ADD COLUMN IF NOT EXISTS policy_version INT DEFAULT 1",
             "ALTER TABLE approvals ADD COLUMN IF NOT EXISTS decided_at TIMESTAMP",
+            "ALTER TABLE policies ADD COLUMN IF NOT EXISTS auto_approve_limit INT DEFAULT 500000",
+            "ALTER TABLE policies ADD COLUMN IF NOT EXISTS approval_limit INT DEFAULT 1000000",
+            "ALTER TABLE policies ADD COLUMN IF NOT EXISTS hard_block_limit INT DEFAULT 2000000",
+            "ALTER TABLE policies ADD COLUMN IF NOT EXISTS max_campaign_budget INT DEFAULT 1000000",
+            "ALTER TABLE policies ADD COLUMN IF NOT EXISTS max_daily_spend INT DEFAULT 5000000",
+            "ALTER TABLE policies ADD COLUMN IF NOT EXISTS min_margin_pct INT DEFAULT 10",
+            "ALTER TABLE products ADD COLUMN IF NOT EXISTS reserved INT DEFAULT 0",
+
         ]:
             try: conn.execute(_text(ddl)); conn.commit()
             except Exception as e: print(f"migrate skip {ddl[:30]}: {e}")
@@ -97,6 +105,8 @@ app.include_router(growth.router)
 app.include_router(growth_agent.router)
 app.include_router(campaigns.router)
 app.include_router(workers.router, prefix="/api/v1")
+app.include_router(autonomous.router)
+app.include_router(hardening.router)
 app.include_router(evaluation.router, prefix="/api/v1")
 
 @app.get("/health")

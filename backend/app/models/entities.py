@@ -111,7 +111,13 @@ class Policy(Base):
     id=Column(String, primary_key=True, default=lambda: gen_id("pol"))
     merchant_id=Column(String, ForeignKey("merchants.id"), unique=True)
     max_transaction=Column(Integer, default=500000)
+    auto_approve_limit=Column(Integer, default=500000)  # P1-17: explicit tiers paise
+    approval_limit=Column(Integer, default=1000000)
+    hard_block_limit=Column(Integer, default=2000000)
     max_discount=Column(Integer, default=15)
+    max_campaign_budget=Column(Integer, default=1000000)
+    max_daily_spend=Column(Integer, default=5000000)
+    min_margin_pct=Column(Integer, default=10)
     auto_approve=Column(Boolean, default=True)
     allowed_actions=Column(JSON, default=lambda: ["create_cart","add_item","create_payment","recommend_product"])
     allowed_categories=Column(JSON, default=list)
@@ -200,6 +206,89 @@ class AgentToolCall(Base):
     policy_result=Column(String, nullable=True)
     risk_score=Column(Float, nullable=True)
     created_at=Column(DateTime, default=datetime.utcnow)
+
+
+class MerchantObjective(Base):
+    __tablename__="merchant_objectives"
+    id=Column(String, primary_key=True, default=lambda: gen_id("obj"))
+    merchant_id=Column(String, ForeignKey("merchants.id"), unique=True)
+    primary_objective=Column(String, default="revenue")  # revenue/margin/clearance/retention
+    risk_tolerance=Column(String, default="medium")  # low/medium/high
+    min_margin_pct=Column(Integer, default=10)
+    max_campaign_budget=Column(Integer, default=1000000)  # paise
+    max_discount=Column(Integer, default=15)
+    max_daily_spend=Column(Integer, default=500000)
+    allowed_categories=Column(JSON, default=list)
+    created_at=Column(DateTime, default=datetime.utcnow)
+    updated_at=Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class CustomerProfile(Base):
+    __tablename__="customer_profiles"
+    id=Column(String, primary_key=True, default=lambda: gen_id("cprof"))
+    customer_id=Column(String, ForeignKey("customers.id"))
+    merchant_id=Column(String, ForeignKey("merchants.id"))
+    rfm_score=Column(String)  # 111-555
+    r_score=Column(Integer)
+    f_score=Column(Integer)
+    m_score=Column(Integer)
+    clv=Column(Integer)  # paise
+    aov=Column(Integer)
+    frequency=Column(Integer)
+    recency_days=Column(Integer)
+    category_affinity=Column(JSON, default=list)
+    price_sensitivity=Column(String)  # low/medium/high
+    churn_prob=Column(Float)
+    predicted_next_category=Column(String, nullable=True)
+    value_segment=Column(String)  # high/medium/low/at_risk/churned
+    last_purchase_at=Column(DateTime, nullable=True)
+    updated_at=Column(DateTime, default=datetime.utcnow)
+
+
+class OutboxEvent(Base):
+    __tablename__="outbox_events"
+    id=Column(String, primary_key=True, default=lambda: gen_id("out"))
+    aggregate_id=Column(String)
+    event_type=Column(String)
+    payload=Column(JSON)
+    status=Column(String, default="pending")  # pending/published/failed
+    created_at=Column(DateTime, default=datetime.utcnow)
+    published_at=Column(DateTime, nullable=True)
+
+class ProductProfile(Base):
+    __tablename__="product_profiles"
+    id=Column(String, primary_key=True, default=lambda: gen_id("pprof"))
+    product_id=Column(String, ForeignKey("products.id"))
+    merchant_id=Column(String, ForeignKey("merchants.id"))
+    sales_velocity=Column(Float)  # units per day
+    revenue_contribution=Column(Float)  # share 0-1
+    margin_pct=Column(Integer, default=20)
+    inventory_level=Column(Integer)
+    days_of_inventory=Column(Float)
+    attach_rate=Column(Float)
+    conversion_rate=Column(Float)
+    return_rate=Column(Float, default=0.02)
+    demand_trend=Column(String)  # rising/stable/falling
+    category_performance=Column(Float)
+    slow_moving_score=Column(Float)  # 0-1 high means slow
+    updated_at=Column(DateTime, default=datetime.utcnow)
+
+class Opportunity(Base):
+    __tablename__="opportunities"
+    id=Column(String, primary_key=True, default=lambda: gen_id("opp"))
+    merchant_id=Column(String, ForeignKey("merchants.id"))
+    type=Column(String)  # cross_sell/upsell/churn/repeat/dead_stock/high_margin/low_margin/stock_risk/high_value/abandoned
+    evidence=Column(JSON, default=dict)
+    target_segment=Column(JSON, default=dict)  # {customer_ids:[], segment_name, count}
+    recommended_product_id=Column(String, nullable=True)
+    recommended_action=Column(String)  # discount_8%, email_campaign, etc
+    expected_revenue=Column(Integer)  # paise
+    expected_margin=Column(Integer)
+    confidence=Column(Float)  # 0-1
+    risk=Column(String)  # low/medium/high
+    priority=Column(Float)  # score
+    status=Column(String, default="open")  # open/proposed/executed/measured
+    created_at=Column(DateTime, default=datetime.utcnow)
+
 
 class Campaign(Base):
     __tablename__="campaigns"

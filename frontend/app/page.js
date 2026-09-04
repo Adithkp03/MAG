@@ -1,142 +1,71 @@
-'use client';
-import { useEffect, useState } from 'react';
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8001';
-
-async function safeFetch(url) {
-  try {
-    const r = await fetch(url);
-    if (!r.ok) return { _error: `${r.status} ${r.statusText}`, _url: url };
-    const ct = r.headers.get('content-type') || '';
-    if (ct.includes('application/json')) return await r.json();
-    return await r.text();
-  } catch (e) {
-    return { _error: e.message, _url: url };
-  }
+"use client";
+import { useEffect, useState } from "react";
+const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8001";
+async function safeFetch(url, opts={}){
+ try{ const r=await fetch(url, opts); const j=await r.json().catch(()=>({})); return { ok:r.ok, status:r.status, data:j }; }catch(e){ return{ ok:false, status:0, data:{error:e.message}}; }
 }
-
-export default function Dashboard() {
-  const [products,setProducts]=useState([]);
-  const [orders,setOrders]=useState([]);
-  const [audit,setAudit]=useState([]);
-  const [recs,setRecs]=useState([]);
-  const [health,setHealth]=useState(null);
-  const [events,setEvents]=useState([]);
-  const [kpis,setKpis]=useState(null);
-  const [traces,setTraces]=useState([]);
-  const [opps,setOpps]=useState([]);
-  const [camps,setCamps]=useState([]);
-  const [errs,setErrs]=useState([]);
-  const [chat,setChat]=useState(''); const [chatLog,setChatLog]=useState([]);
-
-  useEffect(()=>{
-    (async()=>{
-      const e=[];
-      const h = await safeFetch(API+'/health');
-      if (h._error) e.push(`health: ${h._error}`); else setHealth(h);
-      const p = await safeFetch(API+'/api/v1/products');
-      if (p._error) e.push(`products: ${p._error}`); else setProducts(Array.isArray(p) ? p : (p.products || p.items || []));
-      const o = await safeFetch(API+'/api/v1/orders');
-      if (o._error) e.push(`orders: ${o._error}`); else setOrders(Array.isArray(o) ? o : (o.orders || []));
-      const a = await safeFetch(API+'/api/v1/audit?merchant_id=m_demo&limit=8');
-      if (a._error) e.push(`audit: ${a._error}`); else setAudit(Array.isArray(a) ? a : (a.audit || []));
-      const r = await safeFetch(API+'/api/v1/recommendations/cross-sell?product_id=prod_kb1');
-      if (r._error) e.push(`recs: ${r._error}`); else setRecs(r.recommendations || r.candidates || []);
-      const ev = await safeFetch(API+'/api/v1/events?limit=6');
-      if (!ev._error) setEvents(Array.isArray(ev) ? ev : []);
-      const kp = await safeFetch(API+'/api/v1/evaluation/kpis');
-      if (!kp._error) setKpis(kp);
-      const tr = await safeFetch(API+'/api/v1/traces?limit=3');
-      if (!tr._error) setTraces(tr.traces || []);
-      const op = await safeFetch(API+'/growth/opportunities');
-      if (!op._error) setOpps(op.opportunities || []);
-      const ca = await safeFetch(API+'/api/v1/campaigns?merchant_id=m_demo');
-      if (!ca._error) setCamps(ca.campaigns || []);
-      if (e.length) setErrs(e);
-    })();
-  },[]);
-
-  const askAgent = async ()=>{
-    if(!chat.trim()) return;
-    const q=chat; setChat('');
-    const res = await safeFetch(API+'/api/v1/agent/chat');
-    // real call is POST, but safeFetch is GET helper; do POST separately with error handling
-    try{
-      const r = await fetch(API+'/api/v1/agent/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({merchant_id:'m_demo',message:q})});
-      const j = r.ok ? await r.json() : {reply:`${r.status} ${await r.text()}`.slice(0,400)};
-      setChatLog([...chatLog,{q,a:j}]);
-    }catch(err){ setChatLog([...chatLog,{q,a:{reply:`fetch failed: ${err.message}`}}]); }
-  };
-
-  const askGrowth = async ()=>{
-    try{
-      const r = await fetch(API+'/api/v1/growth-agent/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({merchant_id:'m_demo',message:'Find best growth opportunity'})});
-      const j = r.ok ? await r.json() : {_error: await r.text()};
-      setChatLog([...chatLog,{q:'[growth-agent] Find opportunity',a:{reply:(j.final_reply||j._error||JSON.stringify(j)).slice(0,800), groq:true}}]);
-    }catch(err){ setChatLog([...chatLog,{q:'[growth-agent]',a:{reply:err.message}}]); }
-  };
-
-  const revenue = orders.filter(o=>o.status==='paid').reduce((s,o)=>s+o.total,0)/100;
-  return (
-    <div className="min-h-screen p-6 max-w-7xl mx-auto bg-black text-zinc-100">
-      <header className="flex justify-between items-center mb-4">
-        <h1 className="text-2xl font-bold">Merchant Autonomous Growth & Commerce Agent <span className="text-sm font-normal text-zinc-400">v{health?.version || '0.17.0'} — Events + Traces + Evaluation live</span></h1>
-        <div className="text-xs bg-zinc-800 px-3 py-1 rounded">Backend {health?.version || '...'} | {health?.groq} | razorpay:{health?.razorpay} | db:{health?.db?.slice(0,22)}</div>
-      </header>
-      {errs.length>0 && <div className="bg-amber-950 border border-amber-800 text-amber-200 text-xs p-2 rounded mb-4">Fetch warnings: {errs.join(' | ')} — backend must be on {API} (uvicorn --port 8001). Check <a className="underline" href={API+'/health'} target="_blank">{API}/health</a> and <a className="underline" href={API+'/docs'} target="_blank">/docs</a></div>}
-      <div className="grid grid-cols-4 gap-4 mb-6">
-        <div className="bg-zinc-900 p-4 rounded border border-zinc-800"><div className="text-zinc-400 text-xs">REVENUE (paid)</div><div className="text-2xl">₹{revenue.toFixed(0)}</div><div className="text-xs text-emerald-400">orders {orders.length} • conv {kpis?.commerce?.conversion_pct || '?'}%</div></div>
-        <div className="bg-zinc-900 p-4 rounded border border-zinc-800"><div className="text-zinc-400 text-xs">ORDERS</div><div className="text-2xl">{orders.length}</div><div className="text-xs">{orders.filter(o=>o.status==='paid').length} paid • AOV ₹{kpis?.commerce?.aov_inr || '?'}</div></div>
-        <div className="bg-zinc-900 p-4 rounded border border-zinc-800"><div className="text-zinc-400 text-xs">PRODUCTS</div><div className="text-2xl">{products.length}</div><div className="text-xs">catalog • growth {recs.length} recs</div></div>
-        <div className="bg-zinc-900 p-4 rounded border border-zinc-800"><div className="text-zinc-400 text-xs">HEALTH</div><div className="text-xs break-all">{API}/health — {health?.status || 'checking'} • traces {traces.length} • events {events.length}</div><div className="text-xs text-sky-400"><a href={API+'/docs'} target="_blank">Swagger</a> • <a href={API+'/.well-known/ucp'} target="_blank">UCP</a> • <a href={API+'/api/v1/evaluation'} target="_blank">Evaluation</a></div></div>
-      </div>
-
-      <div className="grid grid-cols-3 gap-6">
-        <div className="col-span-2 space-y-6">
-          <div className="bg-zinc-900 rounded border border-zinc-800 p-4">
-            <h2 className="font-semibold mb-3">Products — agent-readable catalog</h2>
-            <table className="w-full text-sm"><thead className="text-zinc-500"><tr><th className="text-left">Name</th><th>Category</th><th>Price</th><th>Stock</th></tr></thead><tbody>{products.map(p=><tr key={p.id} className="border-t border-zinc-800"><td>{p.name}</td><td className="text-center">{p.category}</td><td className="text-center">₹{(p.price/100).toFixed(0)}</td><td className="text-center">{p.stock}</td></tr>)}{products.length===0 && <tr><td colSpan={4} className="text-center text-zinc-500 py-4">No products — is backend running on {API}?</td></tr>}</tbody></table>
-          </div>
-          <div className="bg-zinc-900 rounded border border-zinc-800 p-4">
-            <h2 className="font-semibold mb-3">Orders + Checkout state machine</h2>
-            <table className="w-full text-sm"><thead className="text-zinc-500"><tr><th>ID</th><th>Total</th><th>Status</th></tr></thead><tbody>{orders.slice(0,8).map(o=><tr key={o.id} className="border-t border-zinc-800"><td className="text-xs">{o.id.slice(0,14)}</td><td className="text-center">₹{(o.total/100).toFixed(0)}</td><td className="text-center"><span className={"px-2 py-0.5 rounded text-xs "+(o.status==='paid'?'bg-emerald-900':'bg-zinc-800')}>{o.status}</span></td></tr>)}{orders.length===0 && <tr><td colSpan={3} className="text-center text-zinc-500 py-4">No orders yet</td></tr>}</tbody></table>
-            {kpis && <div className="text-xs text-zinc-400 mt-2">Completion {kpis.commerce.completion_rate_pct}% • Growth incremental ₹{kpis.growth.expected_incremental_inr} expected • Reliability payment {kpis.reliability.payment_success_pct}%</div>}
-          </div>
-          <div className="bg-zinc-900 rounded border border-zinc-800 p-4">
-            <h2 className="font-semibold mb-3">AI Action — Why did the agent do this? (Explainability)</h2>
-            {recs.map((r,i)=><div key={i} className="border border-zinc-800 rounded p-3 mb-2"><div className="font-medium">{r.product.name} — ₹{(r.product.price/100).toFixed(0)}</div><div className="text-xs text-zinc-400">Reason: {r.reason}</div><div className="text-xs">Recommendation score: {r.recommendation_score ?? r.score} | Affinity {(r.affinity*100).toFixed(0)}% {r.expected_uplift_pct?`• Uplift ${r.expected_uplift_pct}%`:``} {r.note?`• ${r.note}`:``}</div></div>)}{recs.length===0 && <div className="text-xs text-zinc-500">No recommendations — seed orders first</div>}
-          </div>
-          <div className="bg-zinc-900 rounded border border-zinc-800 p-4">
-            <h2 className="font-semibold mb-2">Growth Opportunities — Evidence Pipeline</h2>
-            <div className="text-xs text-zinc-400 mb-2">Orders → Profiles → Affinity → Expected Revenue → Recommendation → Outcome</div>
-            {opps.map((o,i)=><div key={i} className="border border-zinc-800 rounded p-2 mb-2"><div className="font-medium">{o.context_category} → {o.recommend || o.recommend_category} — ₹{o.expected_revenue_inr || 0} expected</div><div className="text-zinc-400">{o.opportunity}</div><div className="text-zinc-500">{o.evidence} • score {o.score}</div></div>)}{opps.length===0 && <div className="text-zinc-500">No strong opportunities — need more orders</div>}
-          </div>
-          <div className="bg-zinc-900 rounded border border-zinc-800 p-4">
-            <h2 className="font-semibold mb-2">Campaigns — Proposed → Approved → Active → Measured</h2>
-            {camps.slice(0,4).map(c=><div key={c.id} className="border border-zinc-800 rounded p-2 mb-2"><div className="font-medium text-xs">{c.name} — {c.status}</div><div className="text-xs text-zinc-400">{c.reason}</div><div className="text-xs">Expected ₹{c.expected_inr} {c.measured_inr?`• Measured ₹${c.measured_inr} (${c.measured_conversions} conv)`:``}</div></div>)}{camps.length===0 && <div className="text-zinc-500 text-xs">No campaigns — propose via POST /api/v1/campaigns/propose</div>}
-          </div>
-          <div className="bg-zinc-900 rounded border border-zinc-800 p-4">
-            <h2 className="font-semibold mb-2">Traces — TRACE #92AF (OpenTelemetry-style)</h2>
-            <div className="text-xs space-y-2 max-h-64 overflow-auto">{traces.map(t=><div key={t.trace_id} className="border border-zinc-800 rounded p-2"><div className="font-mono">{t.trace_id.slice(0,8)} — {t.name} {t.duration_ms?`• ${t.duration_ms}ms`:''}</div>{t.spans.map(s=><div key={s.span_id} className="ml-4 text-zinc-400">↳ {s.name} {s.duration_ms?`${s.duration_ms}ms`:''} {s.status}</div>)}</div>)}{traces.length===0 && <div className="text-zinc-500">No traces yet — trigger a UCP checkout or agent run</div>}</div>
-          </div>
-        </div>
-        <div className="space-y-6">
-          <div className="bg-zinc-900 rounded border border-zinc-800 p-4">
-            <h2 className="font-semibold mb-2">Shopper / AI Chat (Groq {health?.groq})</h2>
-            <div className="h-64 overflow-auto bg-black rounded p-2 text-xs space-y-2 mb-2">{chatLog.map((c,i)=><div key={i}><div className="text-sky-300">You: {c.q}</div><div className="text-zinc-300 whitespace-pre-wrap">Agent: {c.a.reply || c.a.final_reply || JSON.stringify(c.a).slice(0,400)} {c.a.groq?'(groq)':''}</div></div>)}{chatLog.length===0 && <div className="text-zinc-600">Try: Find me a gaming keyboard under 3000</div>}</div>
-            <div className="flex gap-2"><input value={chat} onChange={e=>setChat(e.target.value)} onKeyDown={e=>e.key==='Enter'&&askAgent()} placeholder="I need a gaming keyboard..." className="flex-1 bg-zinc-800 rounded px-2 py-1 text-sm"/><button onClick={askAgent} className="bg-white text-black px-3 py-1 rounded text-sm">Send</button></div>
-            <button onClick={askGrowth} className="mt-2 w-full bg-emerald-900 text-emerald-100 rounded py-1 text-xs">Run Growth Agent (evidence table)</button>
-          </div>
-          <div className="bg-zinc-900 rounded border border-zinc-800 p-4">
-            <h2 className="font-semibold mb-2">Agent Activity — Audit Ledger</h2>
-            <div className="space-y-1 text-xs max-h-64 overflow-auto">{audit.map(a=><div key={a.id} className="border-l-2 pl-2 py-1" style={{borderColor: a.result==='success'?'#22c55e': a.result==='captured'?'#22c55e': a.result==='escalated'?'#f59e0b':'#444'}}><div>{new Date(a.timestamp).toLocaleTimeString()} — {a.action}</div><div className="text-zinc-500">{a.reason} {a.amount?`₹${(a.amount/100).toFixed(0)}`:''} | {a.policy_result} | risk {a.risk_score}</div></div>)}{audit.length===0 && <div className="text-zinc-500">No audit events — add to cart / checkout to generate</div>}</div>
-          </div>
-          <div className="bg-zinc-900 rounded border border-zinc-800 p-4">
-            <h2 className="font-semibold mb-2">Events — Redis Streams (fallback memory)</h2>
-            <div className="text-xs space-y-1 max-h-48 overflow-auto">{events.slice(-6).map(e=><div key={e.event_id} className="border-l pl-2" style={{borderColor:'#444'}}><span className="text-sky-300">{e.type}</span> <span className="text-zinc-500">{e.event_id}</span></div>)}{events.length===0 && <div className="text-zinc-500">No events — create a cart to emit cart.created</div>}</div>
-            <div className="text-xs text-zinc-500 mt-2"><a className="text-sky-400" href={API+'/docs'} target="_blank">/docs</a> • <a className="text-sky-400" href={API+'/.well-known/ucp'} target="_blank">UCP</a> • <a className="text-sky-400" href={API+'/api/v1/evaluation'} target="_blank">Evaluation</a></div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+export default function Page(){
+ const [health,setHealth]=useState(null); const [products,setProducts]=useState([]); const [opps,setOpps]=useState([]); const [customers,setCustomers]=useState([]); const [prodIntel,setProdIntel]=useState([]); const [objectives,setObjectives]=useState(null); const [campaigns,setCampaigns]=useState([]); const [warnings,setWarnings]=useState([]); const [running,setRunning]=useState(false); const [explain,setExplain]=useState(null);
+ const [version,setVersion]=useState("0.20.0");
+ async function load(){
+  const warns=[];
+  const h=await safeFetch(API+"/health"); if(h.ok){ setHealth(h.data); setVersion(h.data.version||"0.20.0"); } else warns.push("health");
+  const p=await safeFetch(API+"/api/v1/products"); if(p.ok) setProducts(Array.isArray(p.data)?p.data: p.data.products||[]); else warns.push("products");
+  const o=await safeFetch(API+"/api/v1/opportunities?merchant_id=m_demo"); if(o.ok) setOpps(o.data.opportunities||[]); else warns.push("opps");
+  const c=await safeFetch(API+"/api/v1/intelligence/customers?merchant_id=m_demo"); if(c.ok) setCustomers(c.data.customers||[]); else warns.push("customers");
+  const pi=await safeFetch(API+"/api/v1/intelligence/products?merchant_id=m_demo"); if(pi.ok) setProdIntel(pi.data.products||[]); else warns.push("prodIntel");
+  const obj=await safeFetch(API+"/api/v1/merchant/objectives?merchant_id=m_demo"); if(obj.ok) setObjectives(obj.data); else warns.push("objectives");
+  const camps=await safeFetch(API+"/api/v1/campaigns?merchant_id=m_demo"); if(camps.ok) setCampaigns(camps.data.campaigns||camps.data||[]); else warns.push("camps");
+  setWarnings(warns);
+ }
+ useEffect(()=>{ load(); },[]);
+ async function runMAG(){
+  setRunning(true);
+  let r=await safeFetch(API+"/api/v1/autonomous/run?merchant_id=m_demo",{method:"POST",headers:{"X-Merchant-Id":"m_demo","Content-Type":"application/json"}});
+  if(!r.ok){
+   await safeFetch(API+"/api/v1/opportunities/detect?merchant_id=m_demo",{method:"POST",headers:{"X-Merchant-Id":"m_demo"}});
+  }
+  await load(); setRunning(false);
+ }
+ async function doExplain(id){ const r=await safeFetch(API+"/api/v1/explain/"+id); if(r.ok) setExplain(r.data); }
+ async function planOpp(id){ const r=await safeFetch(API+"/api/v1/opportunities/"+id+"/plan",{method:"POST",headers:{"X-Merchant-Id":"m_demo"}}); await load(); alert(r.ok? "Planned "+(r.data.campaign_id||""): JSON.stringify(r.data)); }
+ return (<div style={{fontFamily:"system-ui,sans-serif",background:"#0a0a0f",color:"#e5e7eb",minHeight:"100vh",padding:"24px"}}>
+  <div style={{maxWidth:"1200px",margin:"0 auto"}}>
+   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:"1px solid #222",paddingBottom:"12px",marginBottom:"16px"}}>
+    <div><h1 style={{fontSize:"22px",fontWeight:800}}>MAG GROWTH CONTROL CENTER</h1><div style={{color:"#9ca3af",fontSize:"12px"}}>Autonomous Growth v{version} — {health?health.status:""}</div></div>
+    <button onClick={runMAG} disabled={running} style={{background:running?"#333":"#7c3aed",color:"#fff",padding:"12px 20px",borderRadius:"10px",fontWeight:700,border:"none",cursor:"pointer"}}>{running?"Running…":"▶ Run MAG Analysis"}</button>
+   </div>
+   {warnings.length>0 && <div style={{background:"#422006",color:"#fbbf24",padding:"8px 12px",borderRadius:"8px",marginBottom:"12px",fontSize:"12px"}}>Warnings: {warnings.join(", ")}</div>}
+   <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"12px",marginBottom:"16px"}}>
+    <div style={{background:"#111827",padding:"16px",borderRadius:"12px"}}><div style={{color:"#9ca3af",fontSize:"11px"}}>REVENUE</div><div style={{fontSize:"20px",fontWeight:800}}>{products.length} products</div></div>
+    <div style={{background:"#111827",padding:"16px",borderRadius:"12px"}}><div style={{color:"#9ca3af",fontSize:"11px"}}>AVG MARGIN</div><div style={{fontSize:"20px",fontWeight:800}}>{prodIntel.length? (prodIntel.reduce((a,p)=>a+p.margin_pct,0)/prodIntel.length).toFixed(0):0}%</div></div>
+    <div style={{background:"#111827",padding:"16px",borderRadius:"12px"}}><div style={{color:"#9ca3af",fontSize:"11px"}}>CUSTOMERS</div><div style={{fontSize:"20px",fontWeight:800}}>{customers.length}</div><div style={{fontSize:"11px",color:"#6b7280"}}>{customers.filter(c=>c.churn_prob>0.6).length} at-risk</div></div>
+    <div style={{background:"#111827",padding:"16px",borderRadius:"12px"}}><div style={{color:"#9ca3af",fontSize:"11px"}}>OPPORTUNITIES</div><div style={{fontSize:"20px",fontWeight:800}}>{opps.length}</div></div>
+   </div>
+   <div style={{background:"#111827",padding:"16px",borderRadius:"12px",marginBottom:"16px"}}>
+    <div style={{display:"flex",justifyContent:"space-between",marginBottom:"10px"}}><h2 style={{fontWeight:700}}>OPPORTUNITIES — {opps.length} detected</h2><span style={{fontSize:"11px",color:"#9ca3af"}}>Score = Margin × Prob × Strategic − Cost − Risk</span></div>
+    {opps.length===0? <div style={{color:"#6b7280",fontSize:"13px"}}>No opportunities — click Run MAG Analysis (10 types: cross-sell, upsell, churn, repeat, dead stock, high-margin, low-margin, stock-risk, high-value, abandoned)</div>:
+    <div style={{display:"grid",gap:"8px"}}>
+     {opps.slice(0,7).map(o=>(<div key={o.opportunity_id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"#0f172a",padding:"10px 12px",borderRadius:"8px",border:"1px solid #1f2937"}}>
+      <div><div style={{fontWeight:600,fontSize:"13px"}}>{o.type} <span style={{color:"#9ca3af",fontWeight:400}}>— {o.recommended_action}</span></div><div style={{fontSize:"11px",color:"#9ca3af"}}>Conf {o.confidence} · Risk {o.risk} · Priority {o.priority}</div></div>
+      <div style={{textAlign:"right"}}><div style={{fontWeight:700,color:"#34d399"}}>₹{o.expected_revenue_inr} rev · ₹{o.expected_margin_inr} margin</div><div style={{display:"flex",gap:"6px",justifyContent:"flex-end",marginTop:"4px"}}><button onClick={()=>doExplain(o.opportunity_id)} style={{fontSize:"11px",background:"#1f2937",color:"#e5e7eb",border:"none",padding:"4px 8px",borderRadius:"6px",cursor:"pointer"}}>Explain</button><button onClick={()=>planOpp(o.opportunity_id)} style={{fontSize:"11px",background:"#7c3aed",color:"#fff",border:"none",padding:"4px 8px",borderRadius:"6px",cursor:"pointer"}}>Plan</button></div></div>
+     </div>))}
+    </div>}
+    {explain && <div style={{marginTop:"10px",background:"#1e1b4b",padding:"12px",borderRadius:"8px",fontSize:"12px"}}><b>{explain.opportunity_id}</b> {explain.WHY}<br/>Evidence {JSON.stringify(explain.EVIDENCE)}<br/>Impact ₹{explain.IMPACT.expected_revenue_inr} · Risk {explain.RISK}</div>}
+   </div>
+   <div style={{background:"#111827",padding:"16px",borderRadius:"12px",marginBottom:"16px"}}>
+    <h2 style={{fontWeight:700,marginBottom:"8px"}}>MERCHANT OBJECTIVE</h2>
+    {objectives? <div style={{fontSize:"12px",display:"flex",gap:"16px",flexWrap:"wrap"}}><span>Primary <b>{objectives.primary_objective}</b></span><span>Risk <b>{objectives.risk_tolerance}</b></span><span>Min margin {objectives.min_margin_pct}%</span><span>Max discount {objectives.max_discount}%</span><span>Max budget ₹{(objectives.max_campaign_budget/100).toFixed(0)}</span></div>:"loading…"}
+   </div>
+   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px",marginBottom:"16px"}}>
+    <div style={{background:"#111827",padding:"16px",borderRadius:"12px"}}><h3 style={{fontWeight:700,fontSize:"13px",marginBottom:"8px"}}>CUSTOMER INTELLIGENCE</h3>{customers.slice(0,5).map(c=>(<div key={c.customer_id} style={{fontSize:"11px",display:"flex",justifyContent:"space-between",borderBottom:"1px solid #1f2937",padding:"6px 0"}}><span>{c.customer_id} · {c.segment} · RFM {c.rfm}</span><span style={{color:c.churn_prob>0.6?"#f87171":"#34d399"}}>CLV ₹{c.clv_inr} · churn {(c.churn_prob*100).toFixed(0)}%</span></div>))}</div>
+    <div style={{background:"#111827",padding:"16px",borderRadius:"12px"}}><h3 style={{fontWeight:700,fontSize:"13px",marginBottom:"8px"}}>PRODUCT INTELLIGENCE</h3>{prodIntel.slice(0,5).map(p=>(<div key={p.product_id} style={{fontSize:"11px",display:"flex",justifyContent:"space-between",borderBottom:"1px solid #1f2937",padding:"6px 0"}}><span>{p.name} · vel {p.velocity}/d · DOI {p.doi}d</span><span>margin {p.margin_pct}%</span></div>))}</div>
+   </div>
+   <div style={{background:"#111827",padding:"16px",borderRadius:"12px",marginBottom:"16px"}}>
+    <h3 style={{fontWeight:700,marginBottom:"8px"}}>CAMPAIGNS</h3>
+    {campaigns.length===0? <div style={{fontSize:"12px",color:"#6b7280"}}>No campaigns — Plan an opportunity, then approve & execute. Funnel: eligible → exposed → viewed → clicked → added → purchased → revenue/margin (10% holdout for incrementality).</div>: campaigns.slice(0,5).map(c=>(<div key={c.id||c.campaign_id} style={{fontSize:"12px",display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #1f2937"}}><span>{c.name||c.id} — {c.status}</span><span>{c.discount?c.discount+"%":""}</span></div>))}
+   </div>
+   <div style={{fontSize:"11px",color:"#6b7280"}}>API {API} · <a href={API+"/docs"} style={{color:"#7c3aed"}}>docs</a></div>
+  </div>
+ </div>);
 }
