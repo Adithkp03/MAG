@@ -33,6 +33,20 @@ _memory_events = []
 
 def publish(event_type: str, payload: dict):
     evt = {"event_id": f"evt_{uuid.uuid4().hex[:8]}", "type": event_type, "payload": payload, "ts": time.time(), "stream": f"{_stream_prefix}:{event_type}"}
+    # Phase 18: outbox pattern — also persist to outbox_events for durable delivery
+    try:
+        from .database import SessionLocal
+        from ..models.entities import OutboxEvent
+        db=SessionLocal()
+        try:
+            db.add(OutboxEvent(aggregate_id=payload.get("payment_id") or payload.get("order_id") or payload.get("campaign_id") or payload.get("checkout_id") or evt["event_id"], event_type=event_type, payload={"event_id": evt["event_id"], "type": event_type, **payload}, status="pending"))
+            db.commit()
+        except Exception as e:
+            db.rollback()
+        finally:
+            db.close()
+    except Exception as e:
+        pass
     r = _get_redis()
     if r:
         try:

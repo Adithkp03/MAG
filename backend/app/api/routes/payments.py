@@ -68,7 +68,7 @@ async def verify(payload: dict):
 
 @router.post("/reconcile")
 async def reconcile(payload: dict, db: Session = Depends(get_db), merchant=Depends(require_merchant_auth)):
-    """P0-6 payment reconciliation: fetch Razorpay status and sync DB if webhook missed"""
+    """P0-6 payment reconciliation: fetch Razorpay status and sync DB if webhook missed — Phase 17 durable states"""
     payment_id = payload.get("payment_id")
     pay = db.query(Payment).filter(Payment.id==payment_id).first()
     if not pay: raise HTTPException(status_code=404, detail={"code":"payment_not_found","message":"not found"})
@@ -79,5 +79,22 @@ async def reconcile(payload: dict, db: Session = Depends(get_db), merchant=Depen
         raise_int = __import__("fastapi").HTTPException(status_code=400, detail={"code":"invalid_payment_id","message":"reconcile requires razorpay_payment_id, not order_id"})
         raise raise_int
     live = await fetch_payment(pid)
-    # sync status if diverged
-    return {"payment_id": pay.id, "db_status": pay.status, "live": live}
+    live_status = live.get("status") if isinstance(live, dict) else None
+    # sync durable states: if live captured but db not captured -> mark captured
+    synced=False
+    if live_status=="captured" and pay.status!="captured":
+        pay.status="captured"
+        if pay.order_id:
+            from ...models.entities import Order, Checkout
+            ord=db.query(Order).filter(Order.id==pay.order_id).first()
+            if ord: ord.status="paid"
+            chk=db.query(Checkout).filter(Checkout.id==ord.checkout_id).first() if ord else None
+            if chk and chk.can_transition("captured"): chk.status="captured"
+        db.commit()
+        synced=True
+    elif live_status=="failed" and pay.status!="failed":
+        pay.status="failed"
+        db.commit()
+        synced=True
+    # also handle idempotency: if duplicate reconcile, return deduped
+    return {"payment_id": pay.id, "db_status": pay.status, "live": live, "live_status": live_status, "synced": synced, "durable": True}
