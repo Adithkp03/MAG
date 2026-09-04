@@ -108,7 +108,16 @@ def run_cycle(merchant_id: str="m_demo", db: Session=Depends(get_db), identity: 
 def outcome(camp_id: str, funnel: dict, db: Session=Depends(get_db), identity: str=Depends(require_merchant_auth)):
     met=record_outcome(db, camp_id, funnel)
     if not met: raise HTTPException(status_code=404, detail="campaign not found")
-    return {"campaign_id": camp_id, "metric_id": met.id, "impressions": met.impressions, "conversions": met.conversions, "revenue_inr": round((met.revenue_paise or 0)/100,2)}
+    return {"campaign_id": camp_id, "metric_id": met.id, "impressions": met.impressions, "conversions": met.conversions, "revenue_inr": round((met.revenue_paise or 0)/100,2), "uplift_inr": round((met.uplift_paise or 0)/100,2), "incremental_conversions": getattr(met,'incremental_conversions',0), "control_conversions": getattr(met,'control_conversions',0), "uplift_pct": getattr(met,'uplift_pct',0)}
+
+@router.post("/campaigns/{camp_id}/execute")
+def execute(camp_id: str, db: Session=Depends(get_db), identity: str=Depends(require_merchant_auth)):
+    from ...services.autonomous_growth import execute_campaign
+    res=execute_campaign(db, camp_id)
+    if not res: raise HTTPException(status_code=404, detail="campaign not found")
+    if "error" in res: raise HTTPException(status_code=400, detail=res["error"])
+    camp=res["campaign"]; funnel=res["funnel"]; met=res["metric"]
+    return {"campaign_id": camp.id, "status": camp.status, "funnel": funnel, "revenue_inr": round((met.revenue_paise or 0)/100,2), "incremental_revenue_inr": round((met.uplift_paise or 0)/100,2), "uplift_pct": getattr(met,'uplift_pct',0)}
 
 @router.post("/learning/update")
 def learn(merchant_id: str="m_demo", db: Session=Depends(get_db), identity: str=Depends(require_merchant_auth)):

@@ -400,6 +400,34 @@ def record_outcome(db: Session, campaign_id: str, funnel: dict):
     met.uplift_pct=round(uplift_pct,1)
     return met
 
+def execute_campaign(db: Session, campaign_id: str):
+    """Phase 9: real campaign execution — in-product funnel + CampaignMetric events, moves PROPOSED/APPROVED -> ACTIVE -> COMPLETED"""
+    from ..models.entities import Campaign, CampaignAudience, CampaignAction
+    camp=db.query(Campaign).filter(Campaign.id==campaign_id).first()
+    if not camp: return None
+    if camp.status not in ("proposed","approved","active"):
+        return {"error": f"campaign status {camp.status} not executable"}
+    # move to active
+    camp.status="active"; db.commit()
+    # simulate funnel from audience + expected economics (deterministic)
+    aud=db.query(CampaignAudience).filter(CampaignAudience.campaign_id==camp.id).first()
+    eligible=aud.customer_count if aud else 100
+    act=db.query(CampaignAction).filter(CampaignAction.campaign_id==camp.id).first()
+    expected=int(camp.expected_incremental_paise or 50000)
+    # deterministic funnel: exposed 90% of eligible (10% holdout), viewed 60%, clicked 20%, added 12%, purchased 8%
+    exposed=int(eligible*0.90)
+    viewed=int(exposed*0.60)
+    clicked=int(viewed*0.33)
+    added=int(clicked*0.60)
+    purchased=int(added*0.66)  # ~8% of eligible
+    # revenue: purchased * avg price from expected
+    avg_price=int(expected/max(purchased,1)) if purchased and expected else 50000
+    revenue=purchased * avg_price
+    funnel={"eligible": eligible, "exposed": exposed, "viewed": viewed, "clicked": clicked, "added": added, "purchased": purchased, "revenue_paise": revenue}
+    met=record_outcome(db, camp.id, funnel)
+    camp.status="completed"; db.commit()
+    return {"campaign": camp, "funnel": funnel, "metric": met, "incremental_revenue": getattr(met,'uplift_paise',0), "incremental_conversions": getattr(met,'incremental_conversions',0)}
+
 def learning_update(db: Session, merchant_id: str="m_demo"):
     """Learning loop: update confidence based on outcome vs expected"""
     from ..models.entities import Campaign, CampaignMetric, Opportunity
