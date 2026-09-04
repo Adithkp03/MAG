@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8001";
+const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 async function safeFetch(url, opts={}){
  try{ const r=await fetch(url, opts); const j=await r.json().catch(()=>({})); return { ok:r.ok, status:r.status, data:j }; }catch(e){ return{ ok:false, status:0, data:{error:e.message}}; }
 }
@@ -10,12 +10,13 @@ export default function Page(){
  async function load(){
   const warns=[];
   const h=await safeFetch(API+"/health"); if(h.ok){ setHealth(h.data); setVersion(h.data.version||"0.20.0"); } else warns.push("health");
-  const p=await safeFetch(API+"/api/v1/products"); if(p.ok) setProducts(Array.isArray(p.data)?p.data: p.data.products||[]); else warns.push("products");
-  const o=await safeFetch(API+"/api/v1/opportunities?merchant_id=m_demo"); if(o.ok) setOpps(o.data.opportunities||[]); else warns.push("opps");
-  const c=await safeFetch(API+"/api/v1/intelligence/customers?merchant_id=m_demo"); if(c.ok) setCustomers(c.data.customers||[]); else warns.push("customers");
-  const pi=await safeFetch(API+"/api/v1/intelligence/products?merchant_id=m_demo"); if(pi.ok) setProdIntel(pi.data.products||[]); else warns.push("prodIntel");
-  const obj=await safeFetch(API+"/api/v1/merchant/objectives?merchant_id=m_demo"); if(obj.ok) setObjectives(obj.data); else warns.push("objectives");
-  const camps=await safeFetch(API+"/api/v1/campaigns?merchant_id=m_demo"); if(camps.ok) setCampaigns(camps.data.campaigns||camps.data||[]); else warns.push("camps");
+  const headers={"X-Merchant-Id":"m_demo"};
+  const p=await safeFetch(API+"/api/v1/products",{headers}); if(p.ok) setProducts(Array.isArray(p.data)?p.data: p.data.products||[]); else warns.push("products");
+  const o=await safeFetch(API+"/api/v1/opportunities?merchant_id=m_demo",{headers}); if(o.ok) setOpps(o.data.opportunities||[]); else warns.push("opps");
+  const c=await safeFetch(API+"/api/v1/intelligence/customers?merchant_id=m_demo",{headers}); if(c.ok) setCustomers(c.data.customers||[]); else warns.push("customers");
+  const pi=await safeFetch(API+"/api/v1/intelligence/products?merchant_id=m_demo",{headers}); if(pi.ok) setProdIntel(pi.data.products||[]); else warns.push("prodIntel");
+  const obj=await safeFetch(API+"/api/v1/merchant/objectives?merchant_id=m_demo",{headers}); if(obj.ok) setObjectives(obj.data); else warns.push("objectives");
+  const camps=await safeFetch(API+"/api/v1/campaigns?merchant_id=m_demo",{headers}); if(camps.ok) setCampaigns(camps.data.campaigns||camps.data||[]); else warns.push("camps");
   setWarnings(warns);
  }
  useEffect(()=>{ load(); },[]);
@@ -84,7 +85,7 @@ export default function Page(){
         <div key={o.opportunity_id} className="flex justify-between items-center bg-gray-50 hover:bg-gray-100 transition-colors p-4 rounded-2xl border border-gray-100">
          <div>
           <div className="font-bold text-sm text-gray-900">{o.type} <span className="text-gray-500 font-medium ml-1">— {o.recommended_action}</span></div>
-          <div className="text-xs font-medium text-gray-500 mt-1">Conf {(o.confidence*100).toFixed(0)}% • Risk {(o.risk*100).toFixed(0)}% • Priority {o.priority}</div>
+          <div className="text-xs font-medium text-gray-500 mt-1">Conf {(o.confidence*100).toFixed(0)}% • Risk {typeof o.risk==='number' ? (o.risk*100).toFixed(0)+'%' : o.risk} • Priority {o.priority}</div>
          </div>
          <div className="text-right">
           <div className="font-bold text-green-600 text-sm">₹{o.expected_revenue_inr} rev <span className="text-gray-300 mx-1">|</span> ₹{o.expected_margin_inr} margin</div>
