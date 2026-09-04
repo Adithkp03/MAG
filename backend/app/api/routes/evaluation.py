@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from ...core.database import get_db
+from ...core.auth import require_merchant_auth
 from ...services.evaluation import full_evaluation, offline_replay
 
 router=APIRouter(prefix="/evaluation", tags=["evaluation"])
