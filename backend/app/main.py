@@ -88,6 +88,24 @@ def get_trace_ep(trace_id: str):
 
 # P0: create new tables Approval/WebhookEvent and handle missing columns via create_all (idempotent)
 Base.metadata.create_all(bind=engine)
+# Phase 19-20: tenant isolation + performance indexes (idempotent)
+try:
+    from sqlalchemy import text as _text
+    with engine.connect() as conn:
+        for ddl in [
+            "CREATE INDEX IF NOT EXISTS idx_products_merchant ON products(merchant_id)",
+            "CREATE INDEX IF NOT EXISTS idx_orders_merchant ON orders(merchant_id)",
+            "CREATE INDEX IF NOT EXISTS idx_checkouts_merchant ON checkouts(merchant_id)",
+            "CREATE INDEX IF NOT EXISTS idx_payments_merchant ON payments(merchant_id)",
+            "CREATE INDEX IF NOT EXISTS idx_campaigns_merchant ON campaigns(merchant_id)",
+            "CREATE INDEX IF NOT EXISTS idx_customers_merchant ON customers(merchant_id)",
+            "CREATE INDEX IF NOT EXISTS idx_opportunities_merchant ON opportunities(merchant_id)",
+            "CREATE INDEX IF NOT EXISTS idx_orders_merchant_created ON orders(merchant_id, created_at DESC)",
+        ]:
+            try: conn.execute(_text(ddl)); conn.commit()
+            except Exception as e: print(f"index skip {ddl[:40]}: {e}")
+except Exception as e:
+    print(f"index creation warn: {e}")
 # migrate missing columns for existing Supabase DB (additive only)
 try:
     from sqlalchemy import text as _text
@@ -181,6 +199,52 @@ def health():
     except Exception:
         redis_ok = False if "redis" in settings.redis_url else None
     return {"status":"ok" if db_ok else "degraded", "phase":"2 razorpay", "version": app.version, "env": settings.env, "groq": "configured" if settings.groq_api_key and "xxx" not in settings.groq_api_key else "missing - set GROQ_API_KEY", "razorpay": "live" if has_keys() else "mock (set RAZORPAY_KEY_ID)", "webhook": "/api/v1/webhooks/razorpay", "db": settings.database_url.split("@")[-1][:40], "db_ok": db_ok, "db_latency_ms": db_latency_ms, "redis_ok": redis_ok, "cache_ttl": settings.cache_ttl_seconds, "migrations": "alembic upgrade head", "tracing": "agent_execution_tracing (set OTEL_EXPORTER_OTLP_ENDPOINT for OTel)", "cors": cors_origins}
+
+@app.get("/health/live")
+def health_live():
+    return {"status":"ok", "check":"live", "version": app.version}
+
+@app.get("/health/ready")
+def health_ready():
+    db_ok=True; redis_ok=None; latency=None
+    try:
+        t0=time.time()
+        with engine.connect() as conn:
+            from sqlalchemy import text as _t
+            conn.execute(_t("SELECT 1"))
+        latency=round((time.time()-t0)*1000,1)
+    except Exception as e:
+        db_ok=False
+    try:
+        import redis as _r
+        from .core.config import settings
+        r=_r.from_url(settings.redis_url, socket_connect_timeout=1, socket_timeout=1)
+        r.ping(); redis_ok=True
+    except: redis_ok=False
+    ready=db_ok and (redis_ok in (True, None) or redis_ok)
+    return {"status":"ready" if ready else "not_ready", "db_ok": db_ok, "redis_ok": redis_ok, "db_latency_ms": latency, "version": app.version}
+
+@app.get("/api/v1/debug/explain")
+def debug_explain(db: Session = Depends(SessionLocal) if False else None):
+    # Phase 20: EXPLAIN ANALYZE for tenant-isolated queries — requires merchant_id
+    from sqlalchemy import text as _t
+    from .core.database import SessionLocal as SL
+    s=SL()
+    try:
+        out={}
+        for q, params in [
+            ("SELECT * FROM products WHERE merchant_id=:mid LIMIT 20", {"mid":"m_demo"}),
+            ("SELECT * FROM orders WHERE merchant_id=:mid ORDER BY created_at DESC LIMIT 20", {"mid":"m_demo"}),
+            ("SELECT merchant_id, COUNT(*) FROM orders WHERE merchant_id=:mid GROUP BY merchant_id", {"mid":"m_demo"}),
+        ]:
+            try:
+                rows=s.execute(_t(f"EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {q}"), params).fetchall()
+                out[q[:40]]=rows[0][0] if rows else "no plan"
+            except Exception as e:
+                out[q[:40]]=f"explain failed: {e}"
+        return {"explain": out, "indexes": "products(merchant_id), orders(merchant_id), checkouts(merchant_id), payments(merchant_id), campaigns(merchant_id)"}
+    finally:
+        s.close()
 
 @app.get("/")
 def root():
