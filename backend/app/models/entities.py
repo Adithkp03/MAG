@@ -273,6 +273,16 @@ class ProductProfile(Base):
     slow_moving_score=Column(Float)  # 0-1 high means slow
     updated_at=Column(DateTime, default=datetime.utcnow)
 
+class InventoryHistory(Base):
+    __tablename__="inventory_history"
+    id=Column(String, primary_key=True, default=lambda: gen_id("ihist"))
+    product_id=Column(String, ForeignKey("products.id"))
+    merchant_id=Column(String, ForeignKey("merchants.id"))
+    stock=Column(Integer)
+    velocity=Column(Float)
+    doi=Column(Float)
+    recorded_at=Column(DateTime, default=datetime.utcnow)
+
 class Opportunity(Base):
     __tablename__="opportunities"
     id=Column(String, primary_key=True, default=lambda: gen_id("opp"))

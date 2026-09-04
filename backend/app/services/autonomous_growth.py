@@ -178,6 +178,17 @@ def compute_product_intelligence(db: Session, merchant_id: str="m_demo"):
         prof.sales_velocity=velocity; prof.revenue_contribution=contrib; prof.margin_pct=margin; prof.inventory_level=p["stock"]
         prof.days_of_inventory=doi; prof.attach_rate=attach; prof.conversion_rate=conv; prof.demand_trend=trend; prof.slow_moving_score=round(slow,2)
         db.commit()
+        # Phase 5: inventory_history snapshot (append daily, keep last 30)
+        try:
+            from ..models.entities import InventoryHistory
+            db.add(InventoryHistory(product_id=pid, merchant_id=merchant_id, stock=p["stock"], velocity=velocity, doi=doi))
+            # prune old >30 per product
+            hist=db.query(InventoryHistory).filter(InventoryHistory.product_id==pid).order_by(InventoryHistory.recorded_at.desc()).all()
+            if len(hist)>30:
+                for old in hist[30:]: db.delete(old)
+            db.commit()
+        except Exception as e:
+            db.rollback()
         out.append({"product_id": pid, "name": p["name"], "category": p["category"], "price": p["price"], "price_inr": round(p["price"]/100,2), "cost_price": cost, "cost_inr": round(cost/100,2) if cost else None, "stock": p["stock"], "velocity": velocity, "revenue_contribution": contrib, "margin_pct": margin, "doi": doi, "attach_rate": attach, "conversion": conv, "trend": trend, "slow_score": round(slow,2)})
     return out
 
