@@ -280,12 +280,48 @@ def stream_by_type(event_type: str, limit: int=20):
     from .core.events import list_stream
     return {event_type: list_stream(event_type, limit)}
 
-# UCP stub for Phase 6 - advertises capabilities
+# UCP ecosystem profile — discoverable by external AI (Full UCP Fix 8)
 @app.get("/.well-known/ucp")
 def ucp_profile():
     return {
-        "ucp_version":"1.0-draft",
-        "merchant_id":"m_demo",
-        "capabilities":["discover","catalog","checkout","payment"],
-        "endpoints":{"checkout":"/api/v1/ucp/checkout","catalog":"/api/v1/ucp/catalog","discover":"/api/v1/ucp/discover","internal_checkout":"/api/v1/checkout","webhooks":"/api/v1/webhooks/razorpay","trusted_ui":"/api/v1/checkout/{id}/approve"}
+        "ucp_version": "1.0-draft",
+        "merchant_id": "m_demo",
+        "merchant_name": "Demo Merchant",
+        "description": "Merchant Autonomous Agent — full UCP ecosystem. External AI can discover catalog, create checkout, and complete payment entirely via UCP without calling custom internal endpoints. Commerce Core is canonical.",
+        "capabilities": ["discover", "catalog", "checkout", "payment", "policy", "approval", "trusted_ui"],
+        "currency": "INR",
+        "payment_methods": ["razorpay"],
+        "endpoints": {
+            "profile": "/.well-known/ucp",
+            "discover": "/api/v1/ucp/discover",
+            "catalog": "/api/v1/ucp/catalog",
+            "checkout_create": "POST /api/v1/ucp/checkout",
+            "checkout_get": "GET /api/v1/ucp/checkout/{id}",
+            "checkout_update": "PUT /api/v1/ucp/checkout/{id}",
+            "checkout_complete": "POST /api/v1/ucp/checkout/{id}/complete",
+            "checkout_cancel": "POST /api/v1/ucp/checkout/{id}/cancel",
+            "trusted_ui": "/api/v1/checkout/{id}/approve",
+            "webhooks": "/api/v1/webhooks/razorpay",
+        },
+        "flow": {
+            "1_discover": "GET /.well-known/ucp -> read capabilities + endpoints",
+            "2_catalog": "GET /api/v1/ucp/catalog?q=keyboard&merchant_id=m_demo -> list products",
+            "3_create": "POST /api/v1/ucp/checkout {merchant_id, customer_id, items:[{product_id, quantity}], continue_url, idempotency_key}",
+            "4_get": "GET /api/v1/ucp/checkout/{id}",
+            "5_update": "PUT /api/v1/ucp/checkout/{id} {items}",
+            "6_complete": "POST /api/v1/ucp/checkout/{id}/complete -> Razorpay order via Commerce Core",
+            "7_cancel": "POST /api/v1/ucp/checkout/{id}/cancel",
+            "approval": "If 402 approval_required -> POST /api/v1/checkout/{id}/approve with X-Approved-By header, then retry complete",
+        },
+        "continue_url": {
+            "description": "Pass continue_url in POST /api/v1/ucp/checkout to receive buyer redirect URL; echoed in checkout resource and respected on complete.",
+            "param": "continue_url",
+            "example": "https://buyer.example.com/return?session=abc",
+        },
+        "internals": "All UCP routes call Commerce Core (services/commerce.py + services/catalog.py) directly — no delegation to custom /api/v1/checkout router. Orders and payments are created via canonical services.",
+        "example_create": {
+            "method": "POST",
+            "url": "/api/v1/ucp/checkout",
+            "body": {"merchant_id": "m_demo", "customer_id": "cust_demo", "items": [{"product_id": "prod_kb1", "quantity": 1}], "continue_url": "https://buyer.example.com/return", "idempotency_key": "ucp_demo_001"},
+        },
     }
