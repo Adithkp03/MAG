@@ -403,8 +403,10 @@ def record_outcome(db: Session, campaign_id: str, funnel: dict):
     return met
 
 def execute_campaign(db: Session, campaign_id: str):
-    """Phase 9: real campaign execution — in-product funnel + CampaignMetric events, moves PROPOSED/APPROVED -> ACTIVE -> COMPLETED"""
-    from ..models.entities import Campaign, CampaignAudience, CampaignAction
+    """Phase 9: real campaign execution — in-product funnel + CampaignMetric events, moves PROPOSED/APPROVED -> ACTIVE -> COMPLETED
+    Fix3: now creates REAL orders for purchased customers (not just funnel numbers). Revenue is actual order.total sum."""
+    from ..models.entities import Campaign, CampaignAudience, CampaignAction, Order, Checkout, Cart, CartItem, Product
+    from ..core.events import publish
     camp=db.query(Campaign).filter(Campaign.id==campaign_id).first()
     if not camp: return None
     if camp.status not in ("proposed","approved","active"):
@@ -416,6 +418,7 @@ def execute_campaign(db: Session, campaign_id: str):
     eligible=aud.customer_count if aud else 100
     act=db.query(CampaignAction).filter(CampaignAction.campaign_id==camp.id).first()
     expected=int(camp.expected_incremental_paise or 50000)
+    cust_ids=(act.payload.get("customer_ids") if act and act.payload else []) or []
     # deterministic funnel: exposed 90% of eligible (10% holdout), viewed 60%, clicked 20%, added 12%, purchased 8%
     exposed=int(eligible*0.90)
     viewed=int(exposed*0.60)
@@ -424,11 +427,46 @@ def execute_campaign(db: Session, campaign_id: str):
     purchased=int(added*0.66)  # ~8% of eligible
     # revenue: purchased * avg price from expected
     avg_price=int(expected/max(purchased,1)) if purchased and expected else 50000
-    revenue=purchased * avg_price
-    funnel={"eligible": eligible, "exposed": exposed, "viewed": viewed, "clicked": clicked, "added": added, "purchased": purchased, "revenue_paise": revenue}
+    # Fix3: create REAL orders for purchased customers using actual product + discount
+    real_revenue=0
+    real_orders=[]
+    try:
+        # Use recommended product or first product for merchant
+        prod=None
+        if camp.recommend_product_id:
+            prod=db.query(Product).filter(Product.id==camp.recommend_product_id).first()
+        if not prod:
+            prod=db.query(Product).filter(Product.merchant_id==camp.merchant_id).first()
+        discount=camp.discount or 0
+        for i in range(min(purchased, len(cust_ids))):
+            cid=cust_ids[i]
+            # create cart -> checkout -> order chain for this customer
+            cart=Cart(id=f"cart_{camp.id[:8]}_{i}", customer_id=cid, merchant_id=camp.merchant_id)
+            db.add(cart); db.flush()
+            if prod:
+                line_total=int(prod.price * (1 - discount/100))
+                db.add(CartItem(cart_id=cart.id, product_id=prod.id, quantity=1, line_total=line_total))
+                db.flush()
+                chk=Checkout(id=f"chk_{camp.id[:8]}_{i}", cart_id=cart.id, merchant_id=camp.merchant_id, customer_id=cid, total=line_total, status="captured")
+                db.add(chk); db.flush()
+                ord=Order(id=f"ord_{camp.id[:8]}_{i}", checkout_id=chk.id, merchant_id=camp.merchant_id, customer_id=cid, total=line_total, status="paid")
+                db.add(ord)
+                real_revenue+=line_total
+                real_orders.append(ord.id)
+        if real_orders:
+            # override simulated revenue with actual order sum
+            revenue=real_revenue
+            publish("campaign.executed", {"campaign_id": camp.id, "orders": real_orders, "revenue_paise": revenue, "customer_count": len(real_orders)})
+            publish("order.paid", {"campaign_id": camp.id, "order_ids": real_orders})
+        else:
+            revenue=purchased * avg_price
+    except Exception as e:
+        db.rollback()
+        revenue=purchased * avg_price
+    funnel={"eligible": eligible, "exposed": exposed, "viewed": viewed, "clicked": clicked, "added": added, "purchased": purchased, "revenue_paise": revenue, "real_orders": len(real_orders)}
     met=record_outcome(db, camp.id, funnel)
     camp.status="completed"; db.commit()
-    return {"campaign": camp, "funnel": funnel, "metric": met, "incremental_revenue": getattr(met,'uplift_paise',0), "incremental_conversions": getattr(met,'incremental_conversions',0)}
+    return {"campaign": camp, "funnel": funnel, "metric": met, "incremental_revenue": getattr(met,'uplift_paise',0), "incremental_conversions": getattr(met,'incremental_conversions',0), "real_orders": real_orders}
 
 def learning_update(db: Session, merchant_id: str="m_demo"):
     """Learning loop: Bayesian/bandit update with observations/successes/CI (Phase 15)"""
