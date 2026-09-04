@@ -98,7 +98,26 @@ def compute_customer_intelligence(db: Session, merchant_id: str="m_demo"):
         prof.predicted_next_category=pred_next; prof.value_segment=seg; prof.last_purchase_at=last
         db.commit()
         out.append({"customer_id": cid, "rfm": rfm, "r": r_score, "f": f_score, "m": m_score, "clv": clv, "clv_inr": round(clv/100,2), "aov_inr": round(aov/100,2), "frequency": freq, "recency_days": recency, "churn_prob": round(churn,2), "segment": seg, "top_categories": top_cats, "predicted_next": pred_next, "price_sensitivity": price_sens})
-    # also include customers with no orders (abandoned)
+    # also include customers with no orders (never purchased) — Phase 4 completeness
+    try:
+        all_cids=set(r["customer_id"] for r in rows)
+        no_order=db.execute(sql_text("SELECT id FROM customers WHERE merchant_id=:mid"), {"mid": merchant_id}).mappings().all()
+        for row in no_order:
+            cid=row["id"]
+            if cid in all_cids: continue
+            # create profile for zero-order customer
+            prof=db.query(CustomerProfile).filter(CustomerProfile.customer_id==cid).first()
+            if not prof:
+                prof=CustomerProfile(customer_id=cid, merchant_id=merchant_id)
+                db.add(prof)
+            prof.r_score=1; prof.f_score=1; prof.m_score=1; prof.rfm_score="111"
+            prof.clv=0; prof.aov=0; prof.frequency=0; prof.recency_days=999
+            prof.category_affinity=[]; prof.price_sensitivity="high"; prof.churn_prob=0.95
+            prof.predicted_next_category=None; prof.value_segment="churned"; prof.last_purchase_at=None
+            db.commit()
+            out.append({"customer_id": cid, "rfm": "111", "r": 1, "f": 1, "m": 1, "clv": 0, "clv_inr": 0, "aov_inr": 0, "frequency": 0, "recency_days": 999, "churn_prob": 0.95, "segment": "churned", "top_categories": [], "predicted_next": None, "price_sensitivity": "high"})
+    except Exception as e:
+        pass
     return out
 
 def compute_product_intelligence(db: Session, merchant_id: str="m_demo"):
