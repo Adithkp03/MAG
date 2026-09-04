@@ -239,7 +239,7 @@ def health_ready():
     return {"status":"ready" if ready else "not_ready", "db_ok": db_ok, "redis_ok": redis_ok, "db_latency_ms": latency, "version": app.version}
 
 @app.get("/api/v1/debug/explain")
-def debug_explain(db: Session = Depends(SessionLocal) if False else None):
+def debug_explain():
     # Phase 20: EXPLAIN ANALYZE for tenant-isolated queries — requires merchant_id
     from sqlalchemy import text as _t
     from .core.database import SessionLocal as SL
