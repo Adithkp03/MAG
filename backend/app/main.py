@@ -1,31 +1,78 @@
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .core.database import Base, engine, SessionLocal
 from .models.entities import Merchant, Customer, Product, Policy
 from .api.routes import products, carts, checkout, orders, trust, webhooks, agent, payments, recommendations, ucp, growth, growth_agent, campaigns, evaluation, workers, autonomous, hardening
+import logging, time
+from .core.config import settings
 
-app = FastAPI(title="Merchant Autonomous Growth & Commerce Agent", version="0.21.0")
+# structured logging
+logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO), format='%(asctime)s %(levelname)s %(name)s %(message)s')
+logger = logging.getLogger("mag")
 
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app = FastAPI(title="Merchant Autonomous Growth & Commerce Agent", version="0.22.0")
 
-# Observability: trace per request
+# --- Production CORS: restrict to ALLOWED_ORIGINS, env-driven ---
+origins = [o.strip() for o in settings.allowed_origins.split(",") if o.strip()] if settings.allowed_origins else []
+# in dev allow all if explicit
+if settings.env != "production" and "*" in origins:
+    cors_origins = ["*"]
+else:
+    cors_origins = origins if origins else ["http://localhost:3000", "http://127.0.0.1:3000"]
+app.add_middleware(CORSMiddleware, allow_origins=cors_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+logger.info(f"CORS origins: {cors_origins} env={settings.env}")
+
+# --- Security headers + trace per request ---
 from fastapi import Request
 from .core.tracing import start_trace, end_trace, start_span, end_span, get_trace_id
 @app.middleware("http")
 async def trace_middleware(request: Request, call_next):
+    # simple rate-limit via in-memory counter (production: use Redis)
     tid=start_trace(f"{request.method} {request.url.path}")
     s=start_span(f"http:{request.method} {request.url.path}", attrs={"path": str(request.url.path)})
+    start = time.time()
     try:
         response=await call_next(request)
         end_span(s, status="ok", attrs={"status": response.status_code})
         response.headers["X-Trace-Id"]=tid
+        response.headers["X-Content-Type-Options"]="nosniff"
+        response.headers["X-Frame-Options"]="DENY"
+        response.headers["Referrer-Policy"]="strict-origin-when-cross-origin"
+        response.headers["Cache-Control"]="no-store" if request.url.path.startswith("/api/v1/checkout") or request.url.path.startswith("/api/v1/payments") else "no-cache"
+        logger.info(f"{request.method} {request.url.path} {response.status_code} {round((time.time()-start)*1000)}ms trace={tid}")
         return response
     except Exception as e:
         end_span(s, status="error", attrs={"error": str(e)[:200]})
+        logger.exception(f"request failed {request.method} {request.url.path}: {e}")
         raise
     finally:
         end_trace(tid)
+
+# --- Simple in-memory rate limiter for expensive endpoints ---
+from collections import defaultdict
+import time as _time
+_rate = defaultdict(list)
+def _check_rate(key: str, limit_per_min: int = 30) -> bool:
+    now = _time.time()
+    window = 60
+    lst = _rate[key]
+    # prune
+    while lst and lst[0] < now - window:
+        lst.pop(0)
+    if len(lst) >= limit_per_min:
+        return False
+    lst.append(now)
+    return True
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    # only limit autonomous/run and checkout creation
+    if request.url.path in ("/api/v1/autonomous/run", "/api/v1/opportunities/detect"):
+        ip = request.client.host if request.client else "unknown"
+        if not _check_rate(f"rl:{ip}:{request.url.path}", limit_per_min=20):
+            from fastapi.responses import JSONResponse
+            return JSONResponse(status_code=429, content={"code":"rate_limited","message":"Too many requests, retry after 60s"})
+    return await call_next(request)
 
 @app.get("/api/v1/traces")
 def list_traces_ep(limit: int=20):
@@ -113,7 +160,27 @@ app.include_router(evaluation.router, prefix="/api/v1")
 def health():
     from .core.config import settings
     from .services.razorpay_adapter import has_keys
-    return {"status":"ok", "phase":"2 razorpay", "version": app.version, "groq": "configured" if settings.groq_api_key and "xxx" not in settings.groq_api_key else "missing - set GROQ_API_KEY", "razorpay": "live" if has_keys() else "mock (set RAZORPAY_KEY_ID)", "webhook": "/api/v1/webhooks/razorpay", "db": settings.database_url.split("@")[-1][:40], "migrations": "alembic upgrade head", "tracing": "agent_execution_tracing (set OTEL_EXPORTER_OTLP_ENDPOINT for OTel)"}
+    # deep checks: db + redis
+    db_ok = True
+    db_latency_ms = None
+    redis_ok = None
+    try:
+        t0 = time.time()
+        with engine.connect() as conn:
+            from sqlalchemy import text as _t
+            conn.execute(_t("SELECT 1"))
+        db_latency_ms = round((time.time()-t0)*1000,1)
+    except Exception as e:
+        db_ok = False
+        logger.warning(f"health db check failed: {e}")
+    try:
+        import redis as _redis
+        r = _redis.from_url(settings.redis_url, socket_connect_timeout=1, socket_timeout=1)
+        r.ping()
+        redis_ok = True
+    except Exception:
+        redis_ok = False if "redis" in settings.redis_url else None
+    return {"status":"ok" if db_ok else "degraded", "phase":"2 razorpay", "version": app.version, "env": settings.env, "groq": "configured" if settings.groq_api_key and "xxx" not in settings.groq_api_key else "missing - set GROQ_API_KEY", "razorpay": "live" if has_keys() else "mock (set RAZORPAY_KEY_ID)", "webhook": "/api/v1/webhooks/razorpay", "db": settings.database_url.split("@")[-1][:40], "db_ok": db_ok, "db_latency_ms": db_latency_ms, "redis_ok": redis_ok, "cache_ttl": settings.cache_ttl_seconds, "migrations": "alembic upgrade head", "tracing": "agent_execution_tracing (set OTEL_EXPORTER_OTLP_ENDPOINT for OTel)", "cors": cors_origins}
 
 @app.get("/")
 def root():

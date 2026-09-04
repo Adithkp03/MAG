@@ -29,43 +29,166 @@ export default function Page(){
  }
  async function doExplain(id){ const r=await safeFetch(API+"/api/v1/explain/"+id); if(r.ok) setExplain(r.data); }
  async function planOpp(id){ const r=await safeFetch(API+"/api/v1/opportunities/"+id+"/plan",{method:"POST",headers:{"X-Merchant-Id":"m_demo"}}); await load(); alert(r.ok? "Planned "+(r.data.campaign_id||""): JSON.stringify(r.data)); }
- return (<div style={{fontFamily:"system-ui,sans-serif",background:"#0a0a0f",color:"#e5e7eb",minHeight:"100vh",padding:"24px"}}>
-  <div style={{maxWidth:"1200px",margin:"0 auto"}}>
-   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:"1px solid #222",paddingBottom:"12px",marginBottom:"16px"}}>
-    <div><h1 style={{fontSize:"22px",fontWeight:800}}>MAG GROWTH CONTROL CENTER</h1><div style={{color:"#9ca3af",fontSize:"12px"}}>Autonomous Growth v{version} — {health?health.status:""}</div></div>
-    <button onClick={runMAG} disabled={running} style={{background:running?"#333":"#7c3aed",color:"#fff",padding:"12px 20px",borderRadius:"10px",fontWeight:700,border:"none",cursor:"pointer"}}>{running?"Running…":"▶ Run MAG Analysis"}</button>
+ return (
+  <div className="min-h-screen bg-[#fafafa] text-gray-900 font-sans p-6">
+   <div className="max-w-6xl mx-auto space-y-6">
+    {/* Header */}
+    <div className="flex justify-between items-center pb-4 border-b border-gray-200">
+     <div>
+      <h1 className="text-2xl font-black tracking-tight text-gray-900">MAG GROWTH CONTROL CENTER</h1>
+      <div className="text-sm font-medium text-gray-500 mt-1">Autonomous Growth v{version} — {health ? health.status : "Connecting..."}</div>
+     </div>
+     <button onClick={runMAG} disabled={running} className="bg-black hover:bg-gray-800 text-white transition-colors duration-200 px-6 py-3 rounded-xl font-bold text-sm shadow-sm flex items-center gap-2">
+      {running ? "Running Analysis…" : "▶ Run MAG Analysis"}
+     </button>
+    </div>
+
+    {warnings.length > 0 && <div className="bg-red-50 text-red-700 border border-red-100 px-4 py-3 rounded-xl text-sm font-medium shadow-sm">Warnings: {warnings.join(", ")}</div>}
+
+    {/* Metrics Row */}
+    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+     <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-center hover:shadow-md transition-shadow">
+      <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Revenue Products</div>
+      <div className="text-2xl font-black text-gray-900">{products.length}</div>
+     </div>
+     <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-center hover:shadow-md transition-shadow">
+      <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Avg Margin</div>
+      <div className="text-2xl font-black text-gray-900">{prodIntel.length ? (prodIntel.reduce((a,p)=>a+p.margin_pct,0)/prodIntel.length).toFixed(0) : 0}%</div>
+     </div>
+     <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-center hover:shadow-md transition-shadow">
+      <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Customers</div>
+      <div className="text-2xl font-black text-gray-900">{customers.length}</div>
+      <div className="text-xs font-semibold text-red-500 mt-1">{customers.filter(c=>c.churn_prob>0.6).length} at-risk</div>
+     </div>
+     <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-center hover:shadow-md transition-shadow">
+      <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Opportunities</div>
+      <div className="text-2xl font-black text-gray-900">{opps.length}</div>
+     </div>
+    </div>
+
+    {/* Opportunities Section */}
+    <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+     <div className="flex justify-between items-end mb-4">
+      <h2 className="text-lg font-bold text-gray-900 tracking-tight">Opportunities <span className="ml-2 px-2 py-1 bg-gray-100 text-gray-600 rounded-lg text-xs">{opps.length} detected</span></h2>
+      <span className="text-xs font-medium text-gray-400">Score = Margin × Prob × Strategic − Cost − Risk</span>
+     </div>
+     
+     {opps.length === 0 ? (
+      <div className="text-sm text-gray-500 font-medium py-8 text-center bg-gray-50 rounded-xl border border-dashed border-gray-200">
+       No opportunities detected. Click "Run MAG Analysis" to scan for growth strategies.
+      </div>
+     ) : (
+      <div className="space-y-3">
+       {opps.slice(0,7).map(o=>(
+        <div key={o.opportunity_id} className="flex justify-between items-center bg-gray-50 hover:bg-gray-100 transition-colors p-4 rounded-2xl border border-gray-100">
+         <div>
+          <div className="font-bold text-sm text-gray-900">{o.type} <span className="text-gray-500 font-medium ml-1">— {o.recommended_action}</span></div>
+          <div className="text-xs font-medium text-gray-500 mt-1">Conf {(o.confidence*100).toFixed(0)}% • Risk {(o.risk*100).toFixed(0)}% • Priority {o.priority}</div>
+         </div>
+         <div className="text-right">
+          <div className="font-bold text-green-600 text-sm">₹{o.expected_revenue_inr} rev <span className="text-gray-300 mx-1">|</span> ₹{o.expected_margin_inr} margin</div>
+          <div className="flex gap-2 justify-end mt-2">
+           <button onClick={()=>doExplain(o.opportunity_id)} className="text-xs bg-white text-gray-700 hover:bg-gray-200 border border-gray-200 font-semibold px-3 py-1.5 rounded-lg transition-colors">Explain</button>
+           <button onClick={()=>planOpp(o.opportunity_id)} className="text-xs bg-black text-white hover:bg-gray-800 font-semibold px-3 py-1.5 rounded-lg transition-colors shadow-sm">Plan</button>
+          </div>
+         </div>
+        </div>
+       ))}
+      </div>
+     )}
+     {explain && (
+      <div className="mt-4 bg-indigo-50 border border-indigo-100 p-4 rounded-2xl text-sm text-indigo-900 shadow-sm">
+       <b className="font-bold block mb-1">{explain.opportunity_id}</b>
+       <p className="mb-2">{explain.WHY}</p>
+       <div className="text-xs opacity-80 font-mono mb-2 bg-indigo-100/50 p-2 rounded-lg break-all">Evidence: {JSON.stringify(explain.EVIDENCE)}</div>
+       <div className="font-semibold text-indigo-700">Impact: ₹{explain.IMPACT?.expected_revenue_inr} • Risk: {explain.RISK}</div>
+      </div>
+     )}
+    </div>
+
+    {/* Objective */}
+    <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+     <h2 className="text-lg font-bold text-gray-900 tracking-tight mb-4">Merchant Objective</h2>
+     {objectives ? (
+      <div className="flex flex-wrap gap-3">
+       <span className="bg-gray-50 border border-gray-100 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-600">Primary: <b className="text-gray-900">{objectives.primary_objective}</b></span>
+       <span className="bg-gray-50 border border-gray-100 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-600">Risk: <b className="text-gray-900">{objectives.risk_tolerance}</b></span>
+       <span className="bg-gray-50 border border-gray-100 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-600">Min Margin: <b className="text-gray-900">{objectives.min_margin_pct}%</b></span>
+       <span className="bg-gray-50 border border-gray-100 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-600">Max Discount: <b className="text-gray-900">{objectives.max_discount}%</b></span>
+       <span className="bg-gray-50 border border-gray-100 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-600">Budget: <b className="text-gray-900">₹{(objectives.max_campaign_budget/100).toFixed(0)}</b></span>
+      </div>
+     ) : <div className="text-sm text-gray-400 font-medium">Loading objectives...</div>}
+    </div>
+
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+     {/* Customer Intel */}
+     <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+      <h3 className="text-sm font-bold tracking-tight text-gray-900 uppercase mb-4">Customer Intelligence</h3>
+      <div className="space-y-3">
+       {customers.slice(0,5).map(c=>(
+        <div key={c.customer_id} className="flex justify-between items-center pb-3 border-b border-gray-50 last:border-0 last:pb-0">
+         <div>
+          <div className="font-semibold text-sm text-gray-800">{c.customer_id}</div>
+          <div className="text-xs font-medium text-gray-400 mt-0.5">{c.segment} • RFM {c.rfm}</div>
+         </div>
+         <div className="text-right">
+          <div className="font-bold text-sm text-gray-900">₹{c.clv_inr} <span className="text-gray-400 font-normal text-xs ml-1">CLV</span></div>
+          <div className={`text-xs font-bold mt-0.5 ${c.churn_prob > 0.6 ? 'text-red-500' : 'text-green-500'}`}>
+           {(c.churn_prob*100).toFixed(0)}% churn
+          </div>
+         </div>
+        </div>
+       ))}
+      </div>
+     </div>
+
+     {/* Product Intel */}
+     <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+      <h3 className="text-sm font-bold tracking-tight text-gray-900 uppercase mb-4">Product Intelligence</h3>
+      <div className="space-y-3">
+       {prodIntel.slice(0,5).map(p=>(
+        <div key={p.product_id} className="flex justify-between items-center pb-3 border-b border-gray-50 last:border-0 last:pb-0">
+         <div>
+          <div className="font-semibold text-sm text-gray-800 truncate max-w-[200px]">{p.name}</div>
+          <div className="text-xs font-medium text-gray-400 mt-0.5">{p.velocity}/day • {p.doi} days inv</div>
+         </div>
+         <div className="text-right">
+          <div className="font-bold text-sm text-gray-900">{p.margin_pct}%</div>
+          <div className="text-xs text-gray-400 font-medium mt-0.5">margin</div>
+         </div>
+        </div>
+       ))}
+      </div>
+     </div>
+    </div>
+
+    {/* Campaigns */}
+    <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+     <h3 className="text-sm font-bold tracking-tight text-gray-900 uppercase mb-4">Active Campaigns</h3>
+     {campaigns.length === 0 ? (
+      <div className="text-sm text-gray-500 font-medium py-6 text-center bg-gray-50 rounded-xl border border-dashed border-gray-200">
+       No active campaigns. Plan an opportunity to launch one.
+      </div>
+     ) : (
+      <div className="space-y-3">
+       {campaigns.slice(0,5).map(c=>(
+        <div key={c.id||c.campaign_id} className="flex justify-between items-center p-3 bg-gray-50 rounded-xl border border-gray-100">
+         <div className="font-semibold text-sm text-gray-900">{c.name||c.id}</div>
+         <div className="flex items-center gap-3">
+          {c.discount && <span className="bg-green-100 text-green-700 font-bold px-2 py-0.5 rounded text-xs">{c.discount}% OFF</span>}
+          <span className="text-xs font-bold uppercase tracking-wider text-gray-500">{c.status}</span>
+         </div>
+        </div>
+       ))}
+      </div>
+     )}
+    </div>
+
+    <div className="text-xs text-gray-400 font-medium text-center pt-4">
+     API: {API} • <a href={API+"/docs"} className="text-black hover:underline">Swagger Docs</a>
+    </div>
+
    </div>
-   {warnings.length>0 && <div style={{background:"#422006",color:"#fbbf24",padding:"8px 12px",borderRadius:"8px",marginBottom:"12px",fontSize:"12px"}}>Warnings: {warnings.join(", ")}</div>}
-   <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"12px",marginBottom:"16px"}}>
-    <div style={{background:"#111827",padding:"16px",borderRadius:"12px"}}><div style={{color:"#9ca3af",fontSize:"11px"}}>REVENUE</div><div style={{fontSize:"20px",fontWeight:800}}>{products.length} products</div></div>
-    <div style={{background:"#111827",padding:"16px",borderRadius:"12px"}}><div style={{color:"#9ca3af",fontSize:"11px"}}>AVG MARGIN</div><div style={{fontSize:"20px",fontWeight:800}}>{prodIntel.length? (prodIntel.reduce((a,p)=>a+p.margin_pct,0)/prodIntel.length).toFixed(0):0}%</div></div>
-    <div style={{background:"#111827",padding:"16px",borderRadius:"12px"}}><div style={{color:"#9ca3af",fontSize:"11px"}}>CUSTOMERS</div><div style={{fontSize:"20px",fontWeight:800}}>{customers.length}</div><div style={{fontSize:"11px",color:"#6b7280"}}>{customers.filter(c=>c.churn_prob>0.6).length} at-risk</div></div>
-    <div style={{background:"#111827",padding:"16px",borderRadius:"12px"}}><div style={{color:"#9ca3af",fontSize:"11px"}}>OPPORTUNITIES</div><div style={{fontSize:"20px",fontWeight:800}}>{opps.length}</div></div>
-   </div>
-   <div style={{background:"#111827",padding:"16px",borderRadius:"12px",marginBottom:"16px"}}>
-    <div style={{display:"flex",justifyContent:"space-between",marginBottom:"10px"}}><h2 style={{fontWeight:700}}>OPPORTUNITIES — {opps.length} detected</h2><span style={{fontSize:"11px",color:"#9ca3af"}}>Score = Margin × Prob × Strategic − Cost − Risk</span></div>
-    {opps.length===0? <div style={{color:"#6b7280",fontSize:"13px"}}>No opportunities — click Run MAG Analysis (10 types: cross-sell, upsell, churn, repeat, dead stock, high-margin, low-margin, stock-risk, high-value, abandoned)</div>:
-    <div style={{display:"grid",gap:"8px"}}>
-     {opps.slice(0,7).map(o=>(<div key={o.opportunity_id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"#0f172a",padding:"10px 12px",borderRadius:"8px",border:"1px solid #1f2937"}}>
-      <div><div style={{fontWeight:600,fontSize:"13px"}}>{o.type} <span style={{color:"#9ca3af",fontWeight:400}}>— {o.recommended_action}</span></div><div style={{fontSize:"11px",color:"#9ca3af"}}>Conf {o.confidence} · Risk {o.risk} · Priority {o.priority}</div></div>
-      <div style={{textAlign:"right"}}><div style={{fontWeight:700,color:"#34d399"}}>₹{o.expected_revenue_inr} rev · ₹{o.expected_margin_inr} margin</div><div style={{display:"flex",gap:"6px",justifyContent:"flex-end",marginTop:"4px"}}><button onClick={()=>doExplain(o.opportunity_id)} style={{fontSize:"11px",background:"#1f2937",color:"#e5e7eb",border:"none",padding:"4px 8px",borderRadius:"6px",cursor:"pointer"}}>Explain</button><button onClick={()=>planOpp(o.opportunity_id)} style={{fontSize:"11px",background:"#7c3aed",color:"#fff",border:"none",padding:"4px 8px",borderRadius:"6px",cursor:"pointer"}}>Plan</button></div></div>
-     </div>))}
-    </div>}
-    {explain && <div style={{marginTop:"10px",background:"#1e1b4b",padding:"12px",borderRadius:"8px",fontSize:"12px"}}><b>{explain.opportunity_id}</b> {explain.WHY}<br/>Evidence {JSON.stringify(explain.EVIDENCE)}<br/>Impact ₹{explain.IMPACT.expected_revenue_inr} · Risk {explain.RISK}</div>}
-   </div>
-   <div style={{background:"#111827",padding:"16px",borderRadius:"12px",marginBottom:"16px"}}>
-    <h2 style={{fontWeight:700,marginBottom:"8px"}}>MERCHANT OBJECTIVE</h2>
-    {objectives? <div style={{fontSize:"12px",display:"flex",gap:"16px",flexWrap:"wrap"}}><span>Primary <b>{objectives.primary_objective}</b></span><span>Risk <b>{objectives.risk_tolerance}</b></span><span>Min margin {objectives.min_margin_pct}%</span><span>Max discount {objectives.max_discount}%</span><span>Max budget ₹{(objectives.max_campaign_budget/100).toFixed(0)}</span></div>:"loading…"}
-   </div>
-   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px",marginBottom:"16px"}}>
-    <div style={{background:"#111827",padding:"16px",borderRadius:"12px"}}><h3 style={{fontWeight:700,fontSize:"13px",marginBottom:"8px"}}>CUSTOMER INTELLIGENCE</h3>{customers.slice(0,5).map(c=>(<div key={c.customer_id} style={{fontSize:"11px",display:"flex",justifyContent:"space-between",borderBottom:"1px solid #1f2937",padding:"6px 0"}}><span>{c.customer_id} · {c.segment} · RFM {c.rfm}</span><span style={{color:c.churn_prob>0.6?"#f87171":"#34d399"}}>CLV ₹{c.clv_inr} · churn {(c.churn_prob*100).toFixed(0)}%</span></div>))}</div>
-    <div style={{background:"#111827",padding:"16px",borderRadius:"12px"}}><h3 style={{fontWeight:700,fontSize:"13px",marginBottom:"8px"}}>PRODUCT INTELLIGENCE</h3>{prodIntel.slice(0,5).map(p=>(<div key={p.product_id} style={{fontSize:"11px",display:"flex",justifyContent:"space-between",borderBottom:"1px solid #1f2937",padding:"6px 0"}}><span>{p.name} · vel {p.velocity}/d · DOI {p.doi}d</span><span>margin {p.margin_pct}%</span></div>))}</div>
-   </div>
-   <div style={{background:"#111827",padding:"16px",borderRadius:"12px",marginBottom:"16px"}}>
-    <h3 style={{fontWeight:700,marginBottom:"8px"}}>CAMPAIGNS</h3>
-    {campaigns.length===0? <div style={{fontSize:"12px",color:"#6b7280"}}>No campaigns — Plan an opportunity, then approve & execute. Funnel: eligible → exposed → viewed → clicked → added → purchased → revenue/margin (10% holdout for incrementality).</div>: campaigns.slice(0,5).map(c=>(<div key={c.id||c.campaign_id} style={{fontSize:"12px",display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #1f2937"}}><span>{c.name||c.id} — {c.status}</span><span>{c.discount?c.discount+"%":""}</span></div>))}
-   </div>
-   <div style={{fontSize:"11px",color:"#6b7280"}}>API {API} · <a href={API+"/docs"} style={{color:"#7c3aed"}}>docs</a></div>
   </div>
- </div>);
+ );
 }

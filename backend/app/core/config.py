@@ -1,4 +1,3 @@
-
 from pydantic_settings import BaseSettings
 import os
 from pathlib import Path
@@ -16,6 +15,10 @@ class Settings(BaseSettings):
     razorpay_webhook_secret: str = os.getenv("RAZORPAY_WEBHOOK_SECRET","")
     jwt_secret: str = os.getenv("JWT_SECRET","dev-secret")
     env: str = os.getenv("ENV","development")
+    allowed_origins: str = os.getenv("ALLOWED_ORIGINS","http://localhost:3000,http://127.0.0.1:3000")
+    rate_limit_per_min: int = int(os.getenv("RATE_LIMIT_PER_MIN","60"))
+    log_level: str = os.getenv("LOG_LEVEL","INFO")
+    cache_ttl_seconds: int = int(os.getenv("CACHE_TTL_SECONDS","60"))
     class Config:
         env_file = str(ENV_PATH)
         env_file_encoding = "utf-8"

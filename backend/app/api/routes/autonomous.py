@@ -47,14 +47,28 @@ def set_objectives(body: ObjectiveIn, merchant_id: str="m_demo", db: Session=Dep
 @router.get("/customers/intelligence")
 @router.get("/intelligence/customers")
 def customers(db: Session=Depends(get_db), merchant_id: str="m_demo"):
+    from ...core.cache import cache_get, cache_set
+    cache_key = f"intel:customers:{merchant_id}"
+    hit = cache_get(cache_key)
+    if hit is not None:
+        return hit
     data=compute_customer_intelligence(db, merchant_id)
-    return {"merchant_id": merchant_id, "count": len(data), "customers": data}
+    res = {"merchant_id": merchant_id, "count": len(data), "customers": data, "cached": False}
+    cache_set(cache_key, res, ttl=60)
+    return res
 
 @router.get("/products-intel")
 @router.get("/intelligence/products")
 def products_intel(db: Session=Depends(get_db), merchant_id: str="m_demo"):
+    from ...core.cache import cache_get, cache_set
+    cache_key = f"intel:products:{merchant_id}"
+    hit = cache_get(cache_key)
+    if hit is not None:
+        return hit
     data=compute_product_intelligence(db, merchant_id)
-    return {"merchant_id": merchant_id, "count": len(data), "products": data}
+    res = {"merchant_id": merchant_id, "count": len(data), "products": data, "cached": False}
+    cache_set(cache_key, res, ttl=60)
+    return res
 
 @router.get("/opportunities")
 def opps(db: Session=Depends(get_db), merchant_id: str="m_demo"):
