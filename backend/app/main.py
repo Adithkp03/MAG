@@ -7,7 +7,21 @@ import logging, time
 from .core.config import settings
 
 # structured logging
-logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO), format='%(asctime)s %(levelname)s %(name)s %(message)s')
+import json as _json
+class JsonFormatter(logging.Formatter):
+    def format(self, record):
+        obj={"ts": self.formatTime(record), "level": record.levelname, "logger": record.name, "msg": record.getMessage()}
+        if hasattr(record, "trace_id"): obj["trace_id"]=record.trace_id
+        if record.exc_info and record.exc_info[0]: obj["exc"]=self.formatException(record.exc_info)
+        return _json.dumps(obj)
+handler=logging.StreamHandler()
+try:
+    if settings.env=="production":
+        handler.setFormatter(JsonFormatter())
+    else:
+        handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s'))
+except: pass
+logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO), handlers=[handler], force=True)
 logger = logging.getLogger("mag")
 
 app = FastAPI(title="Merchant Autonomous Growth & Commerce Agent", version="0.22.0")

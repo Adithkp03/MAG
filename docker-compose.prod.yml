@@ -1,0 +1,29 @@
+services:
+  backend:
+    build: .
+    dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: redis://redis:6379/0
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET}
+      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET}
+      ENV: production
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
+      MERCHANT_AUTH_STRICT: 1
+    ports: ["8000:8000"]
+    depends_on: [redis]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    command: redis-server --appendonly yes
+    volumes: [redisdata:/data]
+volumes:
+  redisdata:
+# Postgres is hosted on Supabase — not in this compose. For local prod test, add postgres:16 with pgdata.
