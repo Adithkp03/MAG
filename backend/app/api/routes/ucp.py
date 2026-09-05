@@ -434,9 +434,9 @@ async def ucp_complete(checkout_id: str, payload: dict = None, db: Session = Dep
         continue_url = ucp["continue_url"]
     out = {
         "checkout": ucp,
-        "payment": {"id": res["payment"].id, "status": res["payment"].status, "razorpay_order_id": res["payment"].razorpay_order_id} if res.get("payment") else None,
+        "payment": {"id": res["payment"]["id"], "status": res["payment"]["status"], "razorpay_order_id": res["payment"]["razorpay_order_id"]} if res.get("payment") else None,
         "razorpay_order": res.get("razorpay_order"),
-        "order": {"id": res["order"].id, "status": res["order"].status, "total": res["order"].total} if res.get("order") else None,
+        "order": {"id": res["order"]["id"], "status": res["order"]["status"], "total": res["order"]["total"]} if res.get("order") else None,
         "has_live_keys": res.get("has_live_keys"),
         "deduped": res.get("deduped", False),
         "via": "ucp_commerce_core",

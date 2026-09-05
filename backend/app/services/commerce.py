@@ -8,6 +8,25 @@ from ..models.entities import Cart, CartItem, Product, Checkout, Order, Payment,
 from ..trust.policy import check_policy
 from ..core.events import publish
 
+
+def _chk_d(c):
+    return {"id": c.id, "status": c.status, "total": c.total, "cart_id": c.cart_id,
+            "merchant_id": c.merchant_id, "customer_id": c.customer_id,
+            "idempotency_key": c.idempotency_key} if c else None
+
+
+def _pay_d(p):
+    return {"id": p.id, "status": p.status, "amount": p.amount, "order_id": p.order_id,
+            "merchant_id": p.merchant_id, "razorpay_order_id": p.razorpay_order_id,
+            "razorpay_payment_id": p.razorpay_payment_id,
+            "idempotency_key": p.idempotency_key} if p else None
+
+
+def _ord_d(o):
+    return {"id": o.id, "status": o.status, "total": o.total, "checkout_id": o.checkout_id,
+            "merchant_id": o.merchant_id, "customer_id": o.customer_id,
+            "payment_id": o.payment_id} if o else None
+
 def create_cart_svc(db: Session, merchant_id: str, customer_id: str=None) -> Cart:
     c=Cart(merchant_id=merchant_id, customer_id=customer_id)
     db.add(c); db.commit(); db.refresh(c)
@@ -115,21 +134,21 @@ async def complete_checkout_svc(db: Session, checkout_id: str) -> dict:
     if not chk: raise HTTPException(status_code=404, detail={"code":"checkout_not_found","message":"not found"})
     if chk.status == "blocked": raise HTTPException(status_code=403, detail={"code":"approval_required","message":"checkout blocked - requires approval via POST /checkout/{id}/approve"})
     if chk.status == "payment_pending":
-        # crash recovery: return existing payment
+        # crash recovery: return existing payment (plain dicts serialize reliably)
         existing_pay=db.query(Payment).filter(Payment.idempotency_key==f"pay_{checkout_id}").first()
         if existing_pay:
-            return {"checkout":chk, "payment":existing_pay, "order":db.query(Order).filter(Order.checkout_id==checkout_id).first(), "razorpay_order":{"id":existing_pay.razorpay_order_id}, "has_live_keys":has_keys(), "deduped":True}
+            return {"checkout":_chk_d(chk), "payment":_pay_d(existing_pay), "order":_ord_d(db.query(Order).filter(Order.checkout_id==checkout_id).first()), "razorpay_order":{"id":existing_pay.razorpay_order_id}, "has_live_keys":has_keys(), "deduped":True}
         ord_tmp=db.query(Order).filter(Order.checkout_id==checkout_id).first()
         if ord_tmp:
             ep=db.query(Payment).filter(Payment.order_id==ord_tmp.id).first()
-            if ep: return {"checkout":chk, "payment":ep, "order":ord_tmp, "razorpay_order":{"id":ep.razorpay_order_id}, "has_live_keys":has_keys(), "deduped":True}
+            if ep: return {"checkout":_chk_d(chk), "payment":_pay_d(ep), "order":_ord_d(ord_tmp), "razorpay_order":{"id":ep.razorpay_order_id}, "has_live_keys":has_keys(), "deduped":True}
     if not chk.can_transition("payment_pending"): raise HTTPException(status_code=409, detail={"code":"invalid_state_transition","message":f"cannot transition {chk.status} -> payment_pending"})
     deterministic_key=f"pay_{checkout_id}"
     dup_pay=db.query(Payment).filter(Payment.idempotency_key==deterministic_key).first()
     if dup_pay:
         if chk.status != "payment_pending":
             chk.status="payment_pending"; db.commit()
-        return {"checkout":chk, "payment":dup_pay, "order":db.query(Order).filter(Order.checkout_id==checkout_id).first(), "razorpay_order":{"id":dup_pay.razorpay_order_id}, "has_live_keys":has_keys(), "deduped":True}
+        return {"checkout":_chk_d(chk), "payment":_pay_d(dup_pay), "order":_ord_d(db.query(Order).filter(Order.checkout_id==checkout_id).first()), "razorpay_order":{"id":dup_pay.razorpay_order_id}, "has_live_keys":has_keys(), "deduped":True}
     chk.status="payment_pending"; db.commit()
     order=db.query(Order).filter(Order.checkout_id==checkout_id).first()
     rspan=start_span("razorpay.create_order", attrs={"amount":chk.total})
@@ -148,4 +167,5 @@ async def complete_checkout_svc(db: Session, checkout_id: str) -> dict:
         publish_pending(db)
     except Exception:
         pass
-    return {"checkout":chk, "payment":pay, "order":order, "razorpay_order":rzp, "has_live_keys":has_keys()}
+    return {"checkout": _chk_d(chk), "payment": _pay_d(pay), "order": _ord_d(order),
+            "razorpay_order": rzp, "has_live_keys": has_keys()}

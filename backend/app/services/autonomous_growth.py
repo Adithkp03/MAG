@@ -280,7 +280,8 @@ def detect_opportunities(db: Session, merchant_id: str="m_demo"):
         from .growth_intelligence import rank_candidates
         from .conversion import cohort_conversion
         cands=rank_candidates(db, m["category"], merchant_id, limit=1)
-        if cands and cands[0]["affinity"]>0.3:
+        aff0=(cands[0].get("affinity", 0) if cands else 0)
+        if cands and aff0>0.3:
             cand=cands[0]
             # Data-derived: eligible * conv * price * margin. conv comes from
             # historical cohort + Bayesian smoothing, or LearningState posterior
@@ -296,7 +297,7 @@ def detect_opportunities(db: Session, merchant_id: str="m_demo"):
             exp_rev=int(eligible * conv * rec_price)
             exp_margin=int(exp_rev * rec_margin * (1 - min(obj.max_discount,8)/100) - 5000)  # minus campaign cost
             exp_margin=max(0, exp_margin)
-            add_opp("cross_sell", {"base_category": m["category"], "affinity": cand["affinity"], "order_count": order_count, "attach": m["attach_rate"], "eligible": eligible, "conv": round(conv,3), "conv_source": est["source"], "conv_sample": est["sample_size"], "conv_confidence": est["confidence"], "margin_estimated": margin_estimated, "rec_price": rec_price, "rec_margin": rec_margin}, {"segment": f"{m['category']}_buyers", "count": eligible}, cand["product"]["id"], f"discount {min(obj.max_discount,8)}% cross-sell", exp_rev, exp_margin, round(min(0.95, cand["affinity"]*est["confidence"]+0.3*est["predicted_conversion"]),2) if est["source"]!="prior" else round(cand["affinity"],2), "low", cand["score"])
+            add_opp("cross_sell", {"base_category": m["category"], "affinity": cand.get("affinity", aff0), "order_count": order_count, "attach": m["attach_rate"], "eligible": eligible, "conv": round(conv,3), "conv_source": est["source"], "conv_sample": est["sample_size"], "conv_confidence": est["confidence"], "margin_estimated": margin_estimated, "rec_price": rec_price, "rec_margin": rec_margin}, {"segment": f"{m['category']}_buyers", "count": eligible}, cand["product"]["id"], f"discount {min(obj.max_discount,8)}% cross-sell", exp_rev, exp_margin, round(min(0.95, cand.get("affinity", aff0)*est["confidence"]+0.3*est["predicted_conversion"]),2) if est["source"]!="prior" else round(cand.get("affinity", aff0),2), "low", cand["score"])
 
     # 2. Upsell (high AOV customers, recommend higher priced variant)
     high_val=[c for c in cust_intel if c["aov_inr"]>3000 and c["segment"] in ["high_value","champion"]]
@@ -647,22 +648,33 @@ def execute_campaign(db: Session, campaign_id: str, simulation_mode: bool = True
         return None
     if camp.status not in ("proposed", "approved", "active"):
         return {"error": f"campaign status {camp.status} not executable"}
-    # approval gate: escalated campaigns need a valid bound approval
-    if camp.status == "proposed":
-        from ..models.entities import Approval
-        appr = db.query(Approval).filter(
-            Approval.campaign_id == camp.id, Approval.status == "approved").first()
-        if not appr:
-            return {"error": "campaign requires approval before execute (PROPOSED->APPROVED). Call /approve with X-Approved-By."}
-        # verify binding: amount + policy version + action hash unchanged
-        if appr.amount != (camp.approved_amount or camp.budget_paise or appr.amount):
-            return {"error": "approval amount mismatch — re-approval required"}
-        if appr.policy_version != camp.policy_version:
+    # approval gate: ANY execution must satisfy the bound approval.
+    # Escalated campaigns need an approved Approval row; even approved ones
+    # are re-verified so post-approval mutation cannot reuse the approval.
+    from ..models.entities import Approval as _Appr
+    _appr = db.query(_Appr).filter(
+        _Appr.campaign_id == camp.id, _Appr.status == "approved").order_by(
+        _Appr.decided_at.desc()).first()
+    if camp.status == "proposed" and not _appr:
+        return {"error": "campaign requires approval before execute (PROPOSED->APPROVED). Call /approve with X-Approved-By."}
+    if _appr:
+        if _appr.merchant_id != camp.merchant_id:
+            return {"error": "approval merchant mismatch — re-approval required"}
+        if _appr.amount != (camp.budget_paise if camp.budget_paise is not None else _appr.amount):
+            return {"error": "approval amount mismatch — action mutated after approval, re-approval required"}
+        if camp.approved_amount is not None and _appr.amount != camp.approved_amount:
+            return {"error": "approval amount mismatch — action mutated after approval, re-approval required"}
+        if _appr.policy_version != camp.policy_version:
             return {"error": "stale policy version — re-approval required"}
         if camp.action_hash and _action_hash(camp.id, camp.discount or 0, camp.budget_paise or 0, camp.policy_version) != camp.action_hash:
             return {"error": "action mutated after approval — re-approval required"}
-        camp.status = "approved"
-        db.commit()
+        if _appr.expires_at and _appr.expires_at < datetime.utcnow():
+            _appr.status = "expired"
+            db.commit()
+            return {"error": "approval expired — re-approval required"}
+        if camp.status == "proposed":
+            camp.status = "approved"
+            db.commit()
     camp.status = "active"
     camp.simulation_mode = simulation_mode
     db.commit()
@@ -734,6 +746,16 @@ def execute_campaign(db: Session, campaign_id: str, simulation_mode: bool = True
             pass
     met = record_outcome(db, camp.id, None)
     camp.status = "completed"
+    try:
+        from ..models.entities import Opportunity as _Opp, CampaignAction as _CA
+        _act = db.query(_CA).filter(_CA.campaign_id == camp.id).first()
+        _oid = _act.payload.get("opportunity_id") if _act and _act.payload else None
+        if _oid:
+            _o = db.query(_Opp).filter(_Opp.id == _oid).first()
+            if _o and _o.status == "proposed":
+                _o.status = "executed"
+    except Exception:
+        pass
     db.commit()
     t_elig = getattr(met, "treatment_eligible", 0)
     c_elig = getattr(met, "control_eligible", 0)
@@ -844,6 +866,14 @@ def learning_update(db: Session, merchant_id: str="m_demo"):
                            "ci_95": [ls.ci_low, ls.ci_high],
                            "learned_key": key})
                 opp.evidence = ev
+        if opp_id:
+            try:
+                from ..models.entities import Opportunity as _Opp2
+                _o2 = db.query(_Opp2).filter(_Opp2.id == opp_id).first()
+                if _o2 and _o2.status == "executed":
+                    _o2.status = "measured"
+            except Exception:
+                pass
         updates.append({"key": key, "opportunity": opp_id,
                         "previous_estimate": round(prev or 0.08, 4),
                         "observed_conversion": round(t_purch / max(t_elig, 1), 4),

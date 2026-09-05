@@ -316,8 +316,8 @@ def _t_pay():
     chk = create_checkout_svc(db, cart.id)["checkout"]
     first = asyncio.run(complete_checkout_svc(db, chk.id))
     second = asyncio.run(complete_checkout_svc(db, chk.id))
-    assert second.get("deduped") is True and first["payment"].id == second["payment"].id
-    return f"idempotent {first['payment'].id}"
+    assert second.get("deduped") is True and first["payment"]["id"] == second["payment"]["id"]
+    return f"idempotent {first['payment']['id']}"
 
 
 def _t_webhook():

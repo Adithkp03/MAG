@@ -18,6 +18,11 @@ def get_policy(db: Session, merchant_id: str) -> Policy:
     if not pol:
         pol = Policy(merchant_id=merchant_id, **DEFAULT_POLICY)
         db.add(pol); db.commit(); db.refresh(pol)
+    # legacy rows may carry NULL numerics/actions (raw inserts predate defaults)
+    for k, v in {"allowed_actions": DEFAULT_POLICY["allowed_actions"],
+                 "max_transaction": 500000, "max_discount": 15}.items():
+        if getattr(pol, k, None) is None:
+            setattr(pol, k, v)
     return pol
 
 

@@ -334,7 +334,7 @@ def test_negative_security():
     first = asyncio.run(complete_checkout_svc(db, chk.id))
     second = asyncio.run(complete_checkout_svc(db, chk.id))
     assert second.get("deduped") is True, second
-    assert first["payment"].id == second["payment"].id, "duplicate payment!"
+    assert first["payment"]["id"] == second["payment"]["id"], "duplicate payment!"
     db.close()
     db2.close()
     _close(Session)

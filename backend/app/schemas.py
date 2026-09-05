@@ -22,7 +22,7 @@ class ProductOut(BaseModel):
     class Config: from_attributes = True
 
 class CartCreate(BaseModel):
-    merchant_id: str
+    merchant_id: Optional[str] = None  # ignored: authenticated identity is authoritative
     customer_id: Optional[str] = None
 
 class AddItemReq(BaseModel):

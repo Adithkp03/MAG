@@ -22,9 +22,16 @@ class ProposeIn(BaseModel):
 
 @router.post("/propose")
 def propose(body: ProposeIn, db: Session = Depends(get_db), merchant=Depends(require_merchant_auth)):
-    from ...models.entities import Policy
-    pol=db.query(Policy).filter(Policy.merchant_id==body.merchant_id).first()
-    max_disc=pol.max_discount if pol else 15
+    from ...models.entities import Policy, MerchantObjective
+    # body.merchant_id is overridable in JSON: authenticated identity wins
+    if body.merchant_id != merchant:
+        raise HTTPException(status_code=403, detail={"code":"cross_tenant","message":"payload merchant_id does not match authenticated merchant"})
+    pol=db.query(Policy).filter(Policy.merchant_id==merchant).first()
+    obj=db.query(MerchantObjective).filter(MerchantObjective.merchant_id==merchant).first()
+    # effective cap: merchant objective AND policy must both allow (server-side)
+    caps=[c for c in [pol.max_discount if pol else None,
+                      obj.max_discount if obj else None] if c is not None]
+    max_disc=min(caps) if caps else 15
     if body.discount > max_disc:
         raise HTTPException(status_code=403, detail={"code":"policy_blocked","message":f"discount {body.discount}% exceeds max {max_disc}%","details":{"max_discount":max_disc}})
     data=compute_product_metrics(db, body.merchant_id)
