@@ -72,7 +72,13 @@ def compute_customer_metrics(db: Session, merchant_id: str="m_demo"):
     for r in rows:
         cid=r["customer_id"]
         freq=r["freq"]; aov=r["aov"] or 0
-        last=r["last_order"]
+        _lo = r["last_order"]
+        try:
+            from datetime import datetime as _dt
+            _lo = _lo if isinstance(_lo, _dt) else (_dt.fromisoformat(str(_lo).split("+")[0]) if _lo else None)
+        except Exception:
+            _lo = None
+        last=_lo
         recency = (datetime.utcnow() - last).days if last else 999
         # category affinity per customer
         cats = db.execute(text("""

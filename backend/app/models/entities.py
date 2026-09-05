@@ -1,19 +1,25 @@
 
-from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, ForeignKey, Text, JSON
+from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, ForeignKey, Text, JSON, UniqueConstraint, Index, CheckConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import uuid
+import hashlib
 from ..core.database import Base
 
 def gen_id(prefix):
     return f"{prefix}_{uuid.uuid4().hex[:10]}"
+
+def hash_api_key(raw: str) -> str:
+    return "sha256$" + hashlib.sha256(raw.encode()).hexdigest()
 
 class Merchant(Base):
     __tablename__="merchants"
     id=Column(String, primary_key=True, default=lambda: gen_id("m"))
     name=Column(String, nullable=False)
     email=Column(String)
-    api_key=Column(String, unique=True, default=lambda: f"sk_{uuid.uuid4().hex[:16]}")  # for merchant auth P0-16
+    api_key=Column(String, unique=True, nullable=True, default=None)  # legacy plaintext (being migrated, never set for new rows)
+    api_key_hash=Column(String, nullable=True)  # sha256$... secure storage
+    api_key_prefix=Column(String, nullable=True)  # first 6 chars for lookup UX, never the secret
     created_at=Column(DateTime, default=datetime.utcnow)
 
 class Customer(Base):
@@ -88,12 +94,13 @@ class Order(Base):
     __tablename__="orders"
     id=Column(String, primary_key=True, default=lambda: gen_id("ord"))
     checkout_id=Column(String, ForeignKey("checkouts.id"), unique=True)
-    merchant_id=Column(String, ForeignKey("merchants.id"))
+    merchant_id=Column(String, ForeignKey("merchants.id"), index=True)
     customer_id=Column(String, ForeignKey("customers.id"), nullable=True)
+    campaign_id=Column(String, ForeignKey("campaigns.id"), nullable=True)  # observed attribution
     status=Column(String, default="pending")  # pending, paid, failed, cancelled
     total=Column(Integer)
     payment_id=Column(String, ForeignKey("payments.id"), nullable=True)
-    created_at=Column(DateTime, default=datetime.utcnow)
+    created_at=Column(DateTime, default=datetime.utcnow, index=True)
 
 class Payment(Base):
     __tablename__="payments"
@@ -129,14 +136,17 @@ class Approval(Base):
     __tablename__="approvals"
     id=Column(String, primary_key=True, default=lambda: gen_id("appr"))
     merchant_id=Column(String, ForeignKey("merchants.id"))
-    checkout_id=Column(String, ForeignKey("checkouts.id"))
-    action=Column(String)  # create_payment
+    checkout_id=Column(String, ForeignKey("checkouts.id"), nullable=True)
+    campaign_id=Column(String, ForeignKey("campaigns.id"), nullable=True)
+    action=Column(String)  # create_payment / execute_campaign
+    action_type=Column(String, nullable=True)
     amount=Column(Integer)  # exact binding P0-12
-    status=Column(String, default="pending")  # pending, approved, rejected
+    policy_version=Column(Integer)
+    status=Column(String, default="pending")  # pending, approved, rejected, revoked, expired
     requested_by=Column(String)  # agent/session
     approved_by=Column(String, nullable=True)  # authenticated approver P0-10
-    policy_version=Column(Integer)
     reason=Column(Text, default="")
+    expires_at=Column(DateTime, nullable=True)
     created_at=Column(DateTime, default=datetime.utcnow)
     decided_at=Column(DateTime, nullable=True)
 
@@ -147,7 +157,11 @@ class WebhookEvent(Base):
     type=Column(String)
     payload=Column(JSON)
     processed=Column(Boolean, default=False)
+    status=Column(String, default="received")  # received/processing/processed/failed
+    attempts=Column(Integer, default=0)
+    last_error=Column(Text, default="")
     created_at=Column(DateTime, default=datetime.utcnow)
+    __table_args__=(Index("ix_webhook_status", "status"),)
 
 class AuditEvent(Base):
     __tablename__="audit_events"
@@ -312,6 +326,14 @@ class Campaign(Base):
     recommend_product_id=Column(String, nullable=True)
     proposal_reason=Column(Text)
     expected_incremental_paise=Column(Integer, default=0)
+    expected_incremental_margin=Column(Integer, default=0)
+    budget_paise=Column(Integer, default=0)
+    cost_paise=Column(Integer, default=0)
+    policy_version=Column(Integer, default=1)
+    experiment_ratio=Column(Float, default=0.10)  # control fraction
+    simulation_mode=Column(Boolean, default=True)  # True=demo, never presented as observed
+    approved_amount=Column(Integer, nullable=True)  # exact amount bound at approval
+    action_hash=Column(String, nullable=True)  # invalidates approval on mutation
     status=Column(String, default="proposed")  # proposed, approved, active, completed, rejected
     proposed_by=Column(String, default="growth-agent")
     approved_by=Column(String, nullable=True)
@@ -324,7 +346,21 @@ class CampaignAudience(Base):
     campaign_id=Column(String, ForeignKey("campaigns.id"))
     segment=Column(String)  # e.g. keyboard_buyers
     customer_count=Column(Integer, default=0)
+    customer_id=Column(String, nullable=True)  # per-customer experiment row (null = aggregate row)
+    group=Column(String, nullable=True)  # treatment/control
+    assigned_at=Column(DateTime, nullable=True)
+    exposed_at=Column(DateTime, nullable=True)
+    viewed_at=Column(DateTime, nullable=True)
+    clicked_at=Column(DateTime, nullable=True)
+    added_at=Column(DateTime, nullable=True)
+    purchased_at=Column(DateTime, nullable=True)
+    order_id=Column(String, nullable=True)
+    is_simulated=Column(Boolean, default=False)  # demo-synthesized, never real observation
     created_at=Column(DateTime, default=datetime.utcnow)
+    __table_args__=(
+        UniqueConstraint("campaign_id", "customer_id", name="uq_campaign_customer"),
+        Index("ix_audience_campaign_group", "campaign_id", "group"),
+    )
 
 class CampaignAction(Base):
     __tablename__="campaign_actions"
@@ -351,5 +387,39 @@ class CampaignMetric(Base):
     conversions=Column(Integer, default=0)
     revenue_paise=Column(Integer, default=0)
     uplift_paise=Column(Integer, default=0)
+    treatment_eligible=Column(Integer, default=0)
+    treatment_purchases=Column(Integer, default=0)
+    treatment_revenue=Column(Integer, default=0)
+    treatment_margin=Column(Integer, default=0)
+    control_eligible=Column(Integer, default=0)
+    control_purchases=Column(Integer, default=0)
+    control_revenue=Column(Integer, default=0)
+    control_margin=Column(Integer, default=0)
+    incremental_orders=Column(Integer, default=0)
+    incremental_revenue=Column(Integer, default=0)
+    incremental_margin=Column(Integer, default=0)
+    ci_low=Column(Float, nullable=True)
+    ci_high=Column(Float, nullable=True)
+    sample_adequate=Column(Boolean, default=False)
+    simulation_mode=Column(Boolean, default=True)
     recorded_at=Column(DateTime, default=datetime.utcnow)
+
+
+class LearningState(Base):
+    """Persisted posterior per (merchant, learning key). Consumed by next ranking run."""
+    __tablename__="learning_state"
+    id=Column(String, primary_key=True, default=lambda: gen_id("lrn"))
+    merchant_id=Column(String, ForeignKey("merchants.id"), index=True)
+    key=Column(String)  # e.g. cross_sell:mouse, churn_risk:global
+    alpha=Column(Float, default=2.0)
+    beta=Column(Float, default=2.0)
+    observations=Column(Integer, default=0)
+    successes=Column(Integer, default=0)
+    prev_mean=Column(Float, nullable=True)
+    mean=Column(Float, default=0.08)
+    ci_low=Column(Float, nullable=True)
+    ci_high=Column(Float, nullable=True)
+    source=Column(String, default="prior")
+    updated_at=Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    __table_args__=(UniqueConstraint("merchant_id", "key", name="uq_learning_merchant_key"),)
 

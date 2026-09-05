@@ -108,7 +108,10 @@ def approve_checkout_svc(db: Session, checkout_id: str, approved_by: str, reason
 async def complete_checkout_svc(db: Session, checkout_id: str) -> dict:
     from ..services.razorpay_adapter import create_razorpay_order, has_keys
     from ..core.tracing import start_span, end_span
-    chk=db.query(Checkout).filter(Checkout.id==checkout_id).first()
+    from ..services.outbox import publish_outbox
+    # Row lock: concurrent completions serialize on the checkout row.
+    # SQLite ignores with_for_update; Postgres enforces it.
+    chk=db.query(Checkout).filter(Checkout.id==checkout_id).with_for_update().first()
     if not chk: raise HTTPException(status_code=404, detail={"code":"checkout_not_found","message":"not found"})
     if chk.status == "blocked": raise HTTPException(status_code=403, detail={"code":"approval_required","message":"checkout blocked - requires approval via POST /checkout/{id}/approve"})
     if chk.status == "payment_pending":
@@ -132,10 +135,17 @@ async def complete_checkout_svc(db: Session, checkout_id: str) -> dict:
     rspan=start_span("razorpay.create_order", attrs={"amount":chk.total})
     rzp=await create_razorpay_order(chk.total, f"rcpt_{checkout_id}"[:40], notes={"checkout_id":checkout_id, "merchant_id":chk.merchant_id})
     pay=Payment(order_id=order.id if order else None, merchant_id=chk.merchant_id, amount=chk.total, status="pending", razorpay_order_id=rzp.get("id"), idempotency_key=deterministic_key)
-    db.add(pay); db.commit(); db.refresh(pay)
+    db.add(pay); db.flush()
+    # Transactional outbox: payment row + event commit atomically; worker relays to Redis
+    publish_outbox(db, pay.id, "payment.created", {"payment_id":pay.id, "checkout_id":checkout_id, "razorpay_order_id":rzp.get("id")})
+    db.commit(); db.refresh(pay)
     end_span(rspan, attrs={"razorpay_id":rzp.get("id")})
     if order: order.payment_id=pay.id; db.commit()
     ae=AuditEvent(merchant_id=chk.merchant_id, action="create_payment", amount=chk.total, policy_result="approved", authorization="approved", result="pending", reason=f"payment initiated razorpay_order={rzp.get('id')} live={has_keys()} key={deterministic_key}", payload={"checkout_id":checkout_id, "payment_id":pay.id, "razorpay_order_id":rzp.get("id")})
     db.add(ae); db.commit()
-    publish("payment.created", {"payment_id":pay.id, "checkout_id":checkout_id, "razorpay_order_id":rzp.get("id")})
+    try:
+        from ..services.outbox import publish_pending
+        publish_pending(db)
+    except Exception:
+        pass
     return {"checkout":chk, "payment":pay, "order":order, "razorpay_order":rzp, "has_live_keys":has_keys()}

@@ -27,6 +27,10 @@ def auth_check(identity: str=Depends(require_merchant_auth), merchant_id: str = 
 
 @router.post("/inventory/reserve")
 def inv_reserve(product_id: str, qty: int=1, db: Session=Depends(get_db), identity: str=Depends(require_merchant_auth)):
+    from ...models.entities import Product
+    prod = db.query(Product).filter(Product.id==product_id).first()
+    if prod and prod.merchant_id != identity:
+        raise HTTPException(status_code=403, detail={"code": "cross_tenant", "message": "product belongs to another merchant"})
     return reserve_stock(db, product_id, qty)
 
 @router.post("/outbox/publish")
@@ -48,7 +52,7 @@ def agents_compare(merchant_id: str = Depends(require_merchant_auth), db: Sessio
     return {"objective": objective, "compare": cmp, "specialized": {"revenue_pick": rev.id if rev else None, "retention_pick": ret.id if ret else None, "inventory_pick": inv.id if inv else None, "decision": chosen.id if chosen else None}}
 
 @router.get("/webhooks/status")
-def webhook_status(db: Session=Depends(get_db)):
+def webhook_status(db: Session=Depends(get_db), identity: str=Depends(require_merchant_auth)):
     rows=db.execute(sql("SELECT status, COUNT(*) as cnt FROM webhook_events GROUP BY status")).mappings().all()
     return {"webhook_events": [{"status": r["status"], "count": r["cnt"]} for r in rows], "durable_states": ["received","processing","processed","failed"]}
 

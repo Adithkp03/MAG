@@ -17,8 +17,11 @@ def growth_run(body: GrowthRunIn, db: Session = Depends(get_db), merchant_id: st
     run=res["run"]
     return {"run_id": run.id, "status": run.status, "final_reply": run.final_reply, "tool_calls": res["tool_calls"], "fallback": res.get("fallback", False)}
 @router.get("/runs/{run_id}")
-def growth_run_get(run_id: str, db: Session = Depends(get_db)):
+def growth_run_get(run_id: str, db: Session = Depends(get_db), merchant_id: str = Depends(require_merchant_auth)):
+    from fastapi import HTTPException
     from ...models.entities import AgentRun
     r=db.query(AgentRun).filter(AgentRun.id==run_id).first()
     if not r: return {"error":"not found"}
+    if r.merchant_id != merchant_id:
+        raise HTTPException(status_code=403, detail={"code": "cross_tenant", "message": "run belongs to another merchant"})
     return {"id": r.id, "status": r.status, "final_reply": r.final_reply, "user_message": r.user_message}

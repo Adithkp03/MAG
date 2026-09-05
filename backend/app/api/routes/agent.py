@@ -1,7 +1,8 @@
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from ...core.database import get_db
+from ...core.auth import require_merchant_auth
 from ...models.entities import Product, Cart, AgentSession, AuditEvent
 from ...services.catalog import search_products
 from ...services.recommendation import recommend_cross_sell
@@ -13,16 +14,17 @@ import json
 router = APIRouter(prefix="/agent", tags=["agent"])
 
 @router.post("/chat")
-def chat(payload: dict, db: Session = Depends(get_db)):
-    merchant_id = payload.get("merchant_id")
-    if not merchant_id:
-        raise HTTPException(status_code=400, detail="merchant_id required in payload")
+def chat(payload: dict, db: Session = Depends(get_db), merchant_id: str = Depends(require_merchant_auth)):
+    if payload.get("merchant_id") and payload.get("merchant_id") != merchant_id:
+        raise HTTPException(status_code=403, detail={"code": "cross_tenant", "message": "payload merchant_id does not match authenticated merchant"})
     customer_id = payload.get("customer_id")
     message = payload.get("message","")
     session_id = payload.get("session_id")
-    # ensure session
+    # ensure session (scoped to authenticated merchant)
     if session_id:
-        sess = db.query(AgentSession).filter(AgentSession.id==session_id).first()
+        sess = db.query(AgentSession).filter(AgentSession.id==session_id, AgentSession.merchant_id==merchant_id).first()
+        if session_id and not sess:
+            raise HTTPException(status_code=403, detail={"code": "cross_tenant", "message": "session belongs to another merchant"})
     else:
         sess = None
     if not sess:
@@ -56,20 +58,23 @@ def chat(payload: dict, db: Session = Depends(get_db)):
     prods = search_products(db, merchant_id, q="", max_price=max_price)
     # also try keyword search from message nouns
     if not prods:
-        prods = db.query(Product).limit(3).all()
+        prods = db.query(Product).filter(Product.merchant_id==merchant_id).limit(3).all()
     # cross-sell if one category dominant
     recs=[]
     if prods:
-        recs = recommend_cross_sell(prods[0].category or "general", db.query(Product).all(), limit=2)
+        recs = recommend_cross_sell(prods[0].category or "general", db.query(Product).filter(Product.merchant_id==merchant_id).all(), limit=2)
     return {"session_id": sess.id, "reply": f"Found {len(prods)} products. Top: {prods[0].name if prods else 'none'}", "products": prods, "recommendations": recs, "groq": False}
 
 def execute_tool(name, args, db, merchant_id):
+    args = dict(args or {})
+    if args.get("merchant_id") and args.get("merchant_id") != merchant_id:
+        return {"error": f"merchant_id mismatch: rejected (authenticated {merchant_id})"}
     if name=="search_products":
         return search_products(db, merchant_id, args.get("q",""), args.get("category",""), args.get("max_price"))
     if name=="get_product":
-        return db.query(Product).filter(Product.id==args["product_id"]).first()
+        return db.query(Product).filter(Product.id==args["product_id"], Product.merchant_id==merchant_id).first()
     if name=="create_cart":
-        c=Cart(merchant_id=args.get("merchant_id",merchant_id), customer_id=args.get("customer_id"))
+        c=Cart(merchant_id=merchant_id, customer_id=args.get("customer_id"))
         db.add(c); db.commit(); db.refresh(c)
         return c
     if name=="add_to_cart":
@@ -79,15 +84,17 @@ def execute_tool(name, args, db, merchant_id):
     return {"error":"unknown tool"}
 
 @router.get("/sessions/{session_id}/audit")
-def session_audit(session_id: str, db: Session = Depends(get_db)):
-    return db.query(AuditEvent).filter(AuditEvent.payload.contains(session_id) if False else True).limit(20).all()
+def session_audit(session_id: str, db: Session = Depends(get_db), merchant_id: str = Depends(require_merchant_auth)):
+    sess = db.query(AgentSession).filter(AgentSession.id==session_id).first()
+    if sess and sess.merchant_id != merchant_id:
+        raise HTTPException(status_code=403, detail={"code": "cross_tenant", "message": "session belongs to another merchant"})
+    return db.query(AuditEvent).filter(AuditEvent.merchant_id==merchant_id).order_by(AuditEvent.timestamp.desc()).limit(20).all()
 
 @router.post("/run", tags=["agent"])
-def agent_run(payload: dict, db: Session = Depends(get_db)):
+def agent_run(payload: dict, db: Session = Depends(get_db), merchant_id: str = Depends(require_merchant_auth)):
     from ...agent.runtime import run_agent
-    merchant_id = payload.get("merchant_id")
-    if not merchant_id:
-        raise HTTPException(status_code=400, detail="merchant_id required in payload")
+    if payload.get("merchant_id") and payload.get("merchant_id") != merchant_id:
+        raise HTTPException(status_code=403, detail={"code": "cross_tenant", "message": "payload merchant_id does not match authenticated merchant"})
     customer_id=payload.get("customer_id")
     message=payload.get("message","")
     session_id=payload.get("session_id")
@@ -105,17 +112,22 @@ def agent_run(payload: dict, db: Session = Depends(get_db)):
     }
 
 @router.get("/runs/{run_id}")
-def get_run(run_id: str, db: Session = Depends(get_db)):
+def get_run(run_id: str, db: Session = Depends(get_db), merchant_id: str = Depends(require_merchant_auth)):
     from ...models.entities import AgentRun, AgentToolCall, AgentMessage
     run=db.query(AgentRun).filter(AgentRun.id==run_id).first()
     if not run: return {"error":"not found"}
+    if run.merchant_id != merchant_id:
+        raise HTTPException(status_code=403, detail={"code": "cross_tenant", "message": "run belongs to another merchant"})
     tcs=db.query(AgentToolCall).filter(AgentToolCall.run_id==run_id).order_by(AgentToolCall.created_at).all()
     msgs=db.query(AgentMessage).filter(AgentMessage.run_id==run_id).order_by(AgentMessage.created_at).all()
     return {"run": {"id": run.id, "status": run.status, "user_message": run.user_message, "final_reply": run.final_reply, "created_at": run.created_at, "completed_at": run.completed_at}, "tool_calls": [{"tool": tc.tool, "input": tc.input, "output": tc.output, "policy_result": tc.policy_result} for tc in tcs], "messages": [{"role": m.role, "content": m.content[:500]} for m in msgs]}
 
 @router.get("/sessions/{session_id}/runs")
-def session_runs(session_id: str, db: Session = Depends(get_db)):
+def session_runs(session_id: str, db: Session = Depends(get_db), merchant_id: str = Depends(require_merchant_auth)):
     from ...models.entities import AgentRun
-    runs=db.query(AgentRun).filter(AgentRun.session_id==session_id).order_by(AgentRun.created_at.desc()).limit(10).all()
+    sess = db.query(AgentSession).filter(AgentSession.id==session_id).first()
+    if sess and sess.merchant_id != merchant_id:
+        raise HTTPException(status_code=403, detail={"code": "cross_tenant", "message": "session belongs to another merchant"})
+    runs=db.query(AgentRun).filter(AgentRun.session_id==session_id, AgentRun.merchant_id==merchant_id).order_by(AgentRun.created_at.desc()).limit(10).all()
     return [{"id": r.id, "status": r.status, "user_message": r.user_message[:80], "final_reply": (r.final_reply or "")[:120]} for r in runs]
 

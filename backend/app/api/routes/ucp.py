@@ -19,6 +19,7 @@ continue_url (Phase 16) is preserved end-to-end for buyer redirect.
 from fastapi import APIRouter, Depends, HTTPException, Header, Query
 from sqlalchemy.orm import Session
 from ...core.database import get_db
+from ...core.auth import require_merchant_auth
 from ...models.entities import Product, Cart, CartItem, Checkout, Order, Payment, Approval, AuditEvent
 from ...services.catalog import search_products
 from ...services.commerce import create_checkout_svc, complete_checkout_svc
@@ -32,6 +33,18 @@ router = APIRouter(prefix="/ucp", tags=["ucp"])
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
+
+
+def _ucp_scope(chk, merchant_id: str | None, header_merchant: str | None):
+    """UCP is a public storefront adapter: the caller must name the merchant
+    (payload/query) and, when authenticated, the header identity must match.
+    This keeps UCP usable for external buyers while blocking cross-tenant reads."""
+    if merchant_id and chk.merchant_id != merchant_id:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail={"code": "cross_tenant", "message": "checkout belongs to another merchant"})
+    if header_merchant and chk.merchant_id != header_merchant:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail={"code": "cross_tenant", "message": "checkout belongs to another merchant"})
 
 def _to_ucp_checkout(chk: Checkout, db: Session, continue_url: str | None = None):
     order = db.query(Order).filter(Order.checkout_id == chk.id).first()
@@ -302,18 +315,20 @@ def ucp_create_checkout(payload: dict, db: Session = Depends(get_db)):
 
 
 @router.get("/checkout/{checkout_id}")
-def ucp_get_checkout(checkout_id: str, db: Session = Depends(get_db)):
+def ucp_get_checkout(checkout_id: str, db: Session = Depends(get_db), merchant_id: str | None = None, x_merchant_id: str | None = Header(None, alias="X-Merchant-Id")):
     chk = db.query(Checkout).filter(Checkout.id == checkout_id).first()
     if not chk:
         raise HTTPException(status_code=404, detail={"code": "checkout_not_found", "message": "not found"})
+    _ucp_scope(chk, merchant_id, x_merchant_id)
     return {"checkout": _to_ucp_checkout(chk, db)}
 
 
 @router.put("/checkout/{checkout_id}")
-def ucp_update_checkout(checkout_id: str, payload: dict, db: Session = Depends(get_db)):
+def ucp_update_checkout(checkout_id: str, payload: dict, db: Session = Depends(get_db), x_merchant_id: str | None = Header(None, alias="X-Merchant-Id")):
     chk = db.query(Checkout).filter(Checkout.id == checkout_id).first()
     if not chk:
         raise HTTPException(status_code=404, detail={"code": "checkout_not_found", "message": "not found"})
+    _ucp_scope(chk, (payload or {}).get("merchant_id"), x_merchant_id)
     if chk.status != "validated":
         raise HTTPException(status_code=409, detail={"code": "invalid_state", "message": f"can only update validated checkout, current {chk.status}"})
 
@@ -331,7 +346,7 @@ def ucp_update_checkout(checkout_id: str, payload: dict, db: Session = Depends(g
     for it in items:
         pid = it.get("product_id") or it.get("id")
         qty = int(it.get("quantity", 1))
-        prod = db.query(Product).filter(Product.id == pid).first()
+        prod = db.query(Product).filter(Product.id == pid, Product.merchant_id == chk.merchant_id).first()
         if not prod:
             db.rollback()
             raise HTTPException(status_code=404, detail={"code": "product_not_found", "message": f"product {pid} not found"})
@@ -386,13 +401,14 @@ def ucp_update_checkout(checkout_id: str, payload: dict, db: Session = Depends(g
 
 
 @router.post("/checkout/{checkout_id}/complete")
-async def ucp_complete(checkout_id: str, payload: dict = None, db: Session = Depends(get_db)):
+async def ucp_complete(checkout_id: str, payload: dict = None, db: Session = Depends(get_db), x_merchant_id: str | None = Header(None, alias="X-Merchant-Id")):
     """UCP complete — calls Commerce Core complete_checkout_svc directly."""
     if payload is None:
         payload = {}
     chk = db.query(Checkout).filter(Checkout.id == checkout_id).first()
     if not chk:
         raise HTTPException(status_code=404, detail={"code": "checkout_not_found", "message": "not found"})
+    _ucp_scope(chk, (payload or {}).get("merchant_id"), x_merchant_id)
     if chk.status == "blocked":
         raise HTTPException(
             status_code=402,
@@ -432,11 +448,12 @@ async def ucp_complete(checkout_id: str, payload: dict = None, db: Session = Dep
 
 
 @router.post("/checkout/{checkout_id}/cancel")
-def ucp_cancel(checkout_id: str, db: Session = Depends(get_db)):
+def ucp_cancel(checkout_id: str, payload: dict = None, db: Session = Depends(get_db), x_merchant_id: str | None = Header(None, alias="X-Merchant-Id")):
     """UCP cancel — directly via Commerce Core state machine (no router delegation)."""
     chk = db.query(Checkout).filter(Checkout.id == checkout_id).first()
     if not chk:
         raise HTTPException(status_code=404, detail={"code": "checkout_not_found", "message": "not found"})
+    _ucp_scope(chk, (payload or {}).get("merchant_id") if isinstance(payload, dict) else None, x_merchant_id)
     if not chk.can_transition("cancelled"):
         raise HTTPException(status_code=409, detail={"code": "invalid_state_transition", "message": f"cannot transition {chk.status} -> cancelled"})
     chk.status = "cancelled"

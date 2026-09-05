@@ -1,16 +1,18 @@
 "use client";
 import { useEffect, useState } from "react";
 const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+const MERCHANT_KEY = process.env.NEXT_PUBLIC_MERCHANT_KEY || "demo_key_123";
+function authHeaders(extra={}){ return {"X-Merchant-Id":"m_demo","X-API-Key":MERCHANT_KEY,"Content-Type":"application/json",...extra}; }
 async function safeFetch(url, opts={}){
  try{ const r=await fetch(url, opts); const j=await r.json().catch(()=>({})); return { ok:r.ok, status:r.status, data:j }; }catch(e){ return{ ok:false, status:0, data:{error:e.message}}; }
 }
 export default function Page(){
- const [health,setHealth]=useState(null); const [products,setProducts]=useState([]); const [opps,setOpps]=useState([]); const [customers,setCustomers]=useState([]); const [prodIntel,setProdIntel]=useState([]); const [objectives,setObjectives]=useState(null); const [campaigns,setCampaigns]=useState([]); const [warnings,setWarnings]=useState([]); const [running,setRunning]=useState(false); const [explain,setExplain]=useState(null);
+ const [health,setHealth]=useState(null); const [products,setProducts]=useState([]); const [opps,setOpps]=useState([]); const [customers,setCustomers]=useState([]); const [prodIntel,setProdIntel]=useState([]); const [objectives,setObjectives]=useState(null); const [campaigns,setCampaigns]=useState([]); const [warnings,setWarnings]=useState([]); const [running,setRunning]=useState(false); const [explain,setExplain]=useState(null); const [campDetail,setCampDetail]=useState(null);
  const [version,setVersion]=useState("0.20.0");
  async function load(){
   const warns=[];
   const h=await safeFetch(API+"/health"); if(h.ok){ setHealth(h.data); setVersion(h.data.version||"0.20.0"); } else warns.push("health");
-  const headers={"X-Merchant-Id":"m_demo"};
+  const headers=authHeaders();
   const p=await safeFetch(API+"/api/v1/products",{headers}); if(p.ok) setProducts(Array.isArray(p.data)?p.data: p.data.products||[]); else warns.push("products");
   const o=await safeFetch(API+"/api/v1/opportunities?merchant_id=m_demo",{headers}); if(o.ok) setOpps(o.data.opportunities||[]); else warns.push("opps");
   const c=await safeFetch(API+"/api/v1/intelligence/customers?merchant_id=m_demo",{headers}); if(c.ok) setCustomers(c.data.customers||[]); else warns.push("customers");
@@ -23,15 +25,16 @@ export default function Page(){
  async function runMAG(){
   setRunning(true);
   try{
-   let r=await safeFetch(API+"/api/v1/autonomous/run?merchant_id=m_demo",{method:"POST",headers:{"X-Merchant-Id":"m_demo","Content-Type":"application/json"}});
+   let r=await safeFetch(API+"/api/v1/autonomous/run?merchant_id=m_demo",{method:"POST",headers:authHeaders()});
    if(!r.ok){
-    await safeFetch(API+"/api/v1/opportunities/detect?merchant_id=m_demo",{method:"POST",headers:{"X-Merchant-Id":"m_demo"}});
+    await safeFetch(API+"/api/v1/opportunities/detect?merchant_id=m_demo",{method:"POST",headers:authHeaders()});
    }
    await load();
   } finally { setRunning(false); }
  }
- async function doExplain(id){ const r=await safeFetch(API+"/api/v1/explain/"+id); if(r.ok) setExplain(r.data); }
- async function planOpp(id){ const r=await safeFetch(API+"/api/v1/opportunities/"+id+"/plan",{method:"POST",headers:{"X-Merchant-Id":"m_demo"}}); await load(); alert(r.ok? "Planned "+(r.data.campaign_id||""): JSON.stringify(r.data)); }
+ async function doExplain(id){ const r=await safeFetch(API+"/api/v1/explain/"+id,{headers:authHeaders()}); if(r.ok) setExplain(r.data); }
+ async function planOpp(id){ const r=await safeFetch(API+"/api/v1/opportunities/"+id+"/plan",{method:"POST",headers:authHeaders()}); await load(); alert(r.ok? "Planned "+(r.data.campaign_id||""): JSON.stringify(r.data)); }
+ async function openCampaign(id){ const r=await safeFetch(API+"/api/v1/campaigns/"+id,{headers:authHeaders()}); if(r.ok) setCampDetail(r.data); }
  return (
   <div className="min-h-screen bg-[#fafafa] text-gray-900 font-sans p-6">
    <div className="max-w-6xl mx-auto space-y-6">
@@ -74,7 +77,7 @@ export default function Page(){
     <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
      <div className="flex justify-between items-end mb-4">
       <h2 className="text-lg font-bold text-gray-900 tracking-tight">Opportunities <span className="ml-2 px-2 py-1 bg-gray-100 text-gray-600 rounded-lg text-xs">{opps.length} detected</span></h2>
-      <span className="text-xs font-medium text-gray-400">Score = Margin × Prob × Strategic − Cost − Risk</span>
+      <span className="text-xs font-medium text-gray-400">Score = Value(objective) × Prob − Cost − Risk</span>
      </div>
      
      {opps.length === 0 ? (
@@ -88,6 +91,7 @@ export default function Page(){
          <div>
           <div className="font-bold text-sm text-gray-900">{o.type} <span className="text-gray-500 font-medium ml-1">— {o.recommended_action}</span></div>
           <div className="text-xs font-medium text-gray-500 mt-1">Conf {(o.confidence*100).toFixed(0)}% • Risk {typeof o.risk==='number' ? (o.risk*100).toFixed(0)+'%' : o.risk} • Priority {o.priority}</div>
+          {o.evidence && (o.evidence.conv_source||o.evidence.affinity) && <div className="text-xs font-medium text-indigo-600 mt-1">Evidence: {o.evidence.affinity!=null?Math.round(o.evidence.affinity*100)+"% attach • ":""}{o.evidence.conv!=null?"conv "+(o.evidence.conv*100).toFixed(1)+"% ("+o.evidence.conv_source+", n="+(o.evidence.conv_sample||o.evidence.order_count||"?")+")":""}{o.evidence.margin_estimated?" • margin estimated":""}</div>}
          </div>
          <div className="text-right">
           <div className="font-bold text-green-600 text-sm">₹{o.expected_revenue_inr} rev <span className="text-gray-300 mx-1">|</span> ₹{o.expected_margin_inr} margin</div>
@@ -177,14 +181,27 @@ export default function Page(){
      ) : (
       <div className="space-y-3">
        {campaigns.slice(0,5).map(c=>(
+        <div key={"wrap-"+(c.id||c.campaign_id)}><div onClick={()=>openCampaign(c.id||c.campaign_id)} className="cursor-pointer">
         <div key={c.id||c.campaign_id} className="flex justify-between items-center p-3 bg-gray-50 rounded-xl border border-gray-100">
          <div className="font-semibold text-sm text-gray-900">{c.name||c.id}</div>
          <div className="flex items-center gap-3">
           {c.discount && <span className="bg-green-100 text-green-700 font-bold px-2 py-0.5 rounded text-xs">{c.discount}% OFF</span>}
           <span className="text-xs font-bold uppercase tracking-wider text-gray-500">{c.status}</span>
          </div>
-        </div>
+        </div></div>
        ))}
+      </div>
+     )}
+     {campDetail && (
+      <div className="mt-4 bg-amber-50 border border-amber-200 p-4 rounded-2xl text-sm text-amber-900">
+       <div className="flex justify-between items-center mb-2"><b>{campDetail.campaign?.name}</b><button onClick={()=>setCampDetail(null)} className="text-xs underline">close</button></div>
+       <div className="text-xs mb-2">Status: <b>{campDetail.campaign?.status}</b> • {campDetail.metrics?.some(m=>m.simulation_mode)?<span className="bg-amber-200 px-2 py-0.5 rounded font-bold">Demo simulation — not observed behavior</span>:<span className="bg-green-200 px-2 py-0.5 rounded font-bold">Observed</span>}</div>
+       <div className="text-xs font-mono bg-amber-100/60 p-2 rounded-lg break-all mb-2">Reason: {campDetail.campaign?.reason}</div>
+       <div className="grid grid-cols-3 gap-2 text-xs">
+        <div className="bg-white p-2 rounded-lg">Treatment: {campDetail.metrics?.[0]?.treatment_eligible ?? "?"} eligible • {campDetail.metrics?.[0]?.treatment_purchases ?? "?"} purch • ₹{(((campDetail.metrics?.[0]?.treatment_revenue)||0)/100).toFixed(0)}</div>
+        <div className="bg-white p-2 rounded-lg">Control: {campDetail.metrics?.[0]?.control_eligible ?? "?"} eligible • {campDetail.metrics?.[0]?.control_purchases ?? "?"} purch • ₹{(((campDetail.metrics?.[0]?.control_revenue)||0)/100).toFixed(0)}</div>
+        <div className="bg-white p-2 rounded-lg">Incremental: {campDetail.metrics?.[0]?.incremental_orders ?? "?"} orders • ₹{(((campDetail.metrics?.[0]?.incremental_revenue)||0)/100).toFixed(0)} rev • ₹{(((campDetail.metrics?.[0]?.incremental_margin)||0)/100).toFixed(0)} margin {campDetail.metrics?.[0]?.sample_adequate?"• adequate":"• small sample"}</div>
+       </div>
       </div>
      )}
     </div>

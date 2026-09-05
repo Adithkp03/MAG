@@ -23,21 +23,21 @@ prod_demo_21,m_demo,Laptop Bag 15in Lite 21,bag,152200,96824,36,15,Laptop Bag 15
 prod_demo_22,m_demo,Mechanical Keyboard TKL Pro 22,keyboard,846200,588353,30,76,Mechanical Keyboard TKL keyboard - realistic catalog
 prod_demo_23,m_demo,Wireless Gaming Mouse Lite 23,mouse,80800,47966,41,131,Wireless Gaming Mouse mouse - realistic catalog
 prod_demo_24,m_demo,Laptop Bag 15in RGB 24,bag,161200,96250,40,45,Laptop Bag 15in bag - realistic catalog
-prod_acme_01,m_acme,Laptop Bag 15in Pro 1,bag,106200,67881,36,63,Laptop Bag 15in bag - realistic catalog
-prod_acme_02,m_acme,Gaming Keyboard Lite 2,keyboard,210300,148960,29,75,Gaming Keyboard keyboard - realistic catalog
-prod_acme_03,m_acme,Mechanical Keyboard TKL Ultra 3,keyboard,736900,500687,32,39,Mechanical Keyboard TKL keyboard - realistic catalog
-prod_acme_04,m_acme,27in 144Hz Monitor Ultra 4,monitor,1819500,1528176,16,38,27in 144Hz Monitor monitor - realistic catalog
-prod_acme_05,m_acme,Mechanical Keyboard TKL Lite 5,keyboard,797300,502241,37,20,Mechanical Keyboard TKL keyboard - realistic catalog
-prod_acme_06,m_acme,Mechanical Keyboard TKL Pro 6,keyboard,718200,451118,37,37,Mechanical Keyboard TKL keyboard - realistic catalog
-prod_acme_07,m_acme,Gaming Laptop 16GB RTX4060 Max 7,laptop,7456400,6480355,13,6,Gaming Laptop 16GB RTX4060 laptop - realistic catalog
-prod_acme_08,m_acme,XL Mousepad 900x400 RGB 8,mousepad,43100,18703,57,154,XL Mousepad 900x400 mousepad - realistic catalog
-prod_acme_09,m_acme,Wired Headset Lite 9,headset,127100,71325,44,115,Wired Headset headset - realistic catalog
-prod_acme_10,m_acme,Ultrabook 14in RGB 10,laptop,6483500,5247174,19,12,Ultrabook 14in laptop - realistic catalog
-prod_acme_11,m_acme,27in 144Hz Monitor Ultra 11,monitor,2836200,2322364,18,27,27in 144Hz Monitor monitor - realistic catalog
-prod_acme_12,m_acme,Gaming Chair Ergonomic Ultra 12,chair,1712400,1300605,24,22,Gaming Chair Ergonomic chair - realistic catalog
-prod_acme_13,m_acme,Ergonomic Mouse Pro 13,mouse,69800,35149,50,193,Ergonomic Mouse mouse - realistic catalog
-prod_acme_14,m_acme,Wireless Gaming Mouse Max 14,mouse,65000,33460,49,117,Wireless Gaming Mouse mouse - realistic catalog
-prod_acme_15,m_acme,27in 144Hz Monitor Pro 15,monitor,2455700,1927418,22,21,27in 144Hz Monitor monitor - realistic catalog
-prod_acme_16,m_acme,Gaming Keyboard Air 16,keyboard,216200,147808,32,86,Gaming Keyboard keyboard - realistic catalog
-prod_acme_17,m_acme,Ultrabook 14in Ultra 17,laptop,6999500,6111746,13,4,Ultrabook 14in laptop - realistic catalog
-prod_acme_18,m_acme,Mechanical Keyboard TKL Lite 18,keyboard,645300,425847,34,43,Mechanical Keyboard TKL keyboard - realistic catalog
+prod_acme_01,m_acme,Wireless Headset ANC Air 1,headset,351600,200596,43,57,Wireless Headset ANC headset - realistic catalog
+prod_acme_02,m_acme,Ultrabook 14in Ultra 2,laptop,8492000,6976265,18,13,Ultrabook 14in laptop - realistic catalog
+prod_acme_03,m_acme,Ultrabook 14in RGB 3,laptop,7627800,6363404,17,11,Ultrabook 14in laptop - realistic catalog
+prod_acme_04,m_acme,Wireless Gaming Mouse Air 4,mouse,98400,58079,41,144,Wireless Gaming Mouse mouse - realistic catalog
+prod_acme_05,m_acme,Gaming Chair Ergonomic Ultra 5,chair,2042400,1549645,24,18,Gaming Chair Ergonomic chair - realistic catalog
+prod_acme_06,m_acme,Ultrabook 14in Max 6,laptop,8244800,6806733,17,15,Ultrabook 14in laptop - realistic catalog
+prod_acme_07,m_acme,Wireless Headset ANC RGB 7,headset,336700,213074,37,70,Wireless Headset ANC headset - realistic catalog
+prod_acme_08,m_acme,Gaming Laptop 16GB RTX4060 RGB 8,laptop,10390300,8762770,16,7,Gaming Laptop 16GB RTX4060 laptop - realistic catalog
+prod_acme_09,m_acme,Laptop Bag 15in Ultra 9,bag,181200,108711,40,116,Laptop Bag 15in bag - realistic catalog
+prod_acme_10,m_acme,Wireless Headset ANC Pro 10,headset,388700,248831,36,79,Wireless Headset ANC headset - realistic catalog
+prod_acme_11,m_acme,Wireless Gaming Mouse Lite 11,mouse,77900,39049,50,158,Wireless Gaming Mouse mouse - realistic catalog
+prod_acme_12,m_acme,Wireless Gaming Mouse Air 12,mouse,101300,52043,49,118,Wireless Gaming Mouse mouse - realistic catalog
+prod_acme_13,m_acme,Mechanical Keyboard TKL Pro 13,keyboard,705600,471805,33,19,Mechanical Keyboard TKL keyboard - realistic catalog
+prod_acme_14,m_acme,Gaming Keyboard Air 14,keyboard,298500,215710,28,151,Gaming Keyboard keyboard - realistic catalog
+prod_acme_15,m_acme,Laptop Bag 15in RGB 15,bag,120600,77328,36,28,Laptop Bag 15in bag - realistic catalog
+prod_acme_16,m_acme,Wireless Headset ANC Lite 16,headset,415900,260793,37,62,Wireless Headset ANC headset - realistic catalog
+prod_acme_17,m_acme,Wired Headset Pro 17,headset,150100,83595,44,128,Wired Headset headset - realistic catalog
+prod_acme_18,m_acme,Ultrabook 14in Air 18,laptop,7727300,6470310,16,14,Ultrabook 14in laptop - realistic catalog

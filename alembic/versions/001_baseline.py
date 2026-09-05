@@ -1,8 +1,8 @@
 
-"""baseline 0.18 - all tables
+"""baseline 0.18+9.5 - full schema via models (clean installs).
 
 Revision ID: 001_baseline
-Revises: 
+Revises:
 Create Date: 2026-09-03
 """
 from typing import Sequence, Union
@@ -14,12 +14,21 @@ down_revision = None
 branch_labels = None
 depends_on = None
 
+
 def upgrade():
-    # Baseline: create_all via Base.metadata - for fresh DB do:
-    # from backend.app.core.database import Base, engine; Base.metadata.create_all(bind=engine)
-    # This revision is a marker; real schema is managed via create_all + additive ALTERs in main.py
-    # For production, generate with: alembic revision --autogenerate -m "add xyz"
-    pass
+    # Clean install: create the full schema from models. Existing DBs that
+    # predate alembic already have these tables -> create_all is a no-op.
+    try:
+        from backend.app.core.database import Base
+        from backend.app.models import entities  # noqa: F401
+    except ImportError:
+        try:
+            from app.core.database import Base
+            from app.models import entities  # noqa: F401
+        except ImportError:
+            return
+    Base.metadata.create_all(bind=op.get_bind())
+
 
 def downgrade():
     pass

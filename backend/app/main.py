@@ -28,6 +28,8 @@ app = FastAPI(title="Merchant Autonomous Growth & Commerce Agent", version="0.22
 
 # --- Production CORS: restrict to ALLOWED_ORIGINS, env-driven ---
 origins = [o.strip() for o in settings.allowed_origins.split(",") if o.strip()] if settings.allowed_origins else []
+if settings.env == "production" and "*" in origins:
+    raise RuntimeError("ALLOWED_ORIGINS must not be '*' in production")
 # in dev allow all if explicit
 if settings.env != "production" and "*" in origins:
     cors_origins = ["*"]
@@ -81,7 +83,7 @@ def _check_rate(key: str, limit_per_min: int = 30) -> bool:
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
     # only limit autonomous/run and checkout creation
-    if request.url.path in ("/api/v1/autonomous/run", "/api/v1/opportunities/detect"):
+    if request.url.path in ("/api/v1/autonomous/run", "/api/v1/opportunities/detect", "/api/v1/growth-agent/run", "/api/v1/campaigns"):
         ip = request.client.host if request.client else "unknown"
         if not _check_rate(f"rl:{ip}:{request.url.path}", limit_per_min=20):
             from fastapi.responses import JSONResponse
@@ -120,36 +122,132 @@ try:
             except Exception as e: print(f"index skip {ddl[:40]}: {e}")
 except Exception as e:
     print(f"index creation warn: {e}")
-# migrate missing columns for existing Supabase DB (additive only)
-try:
+# migrate missing columns for existing DBs (additive only, sqlite + postgres compatible)
+def _ensure_column(table: str, column: str, ddl_type: str):
     from sqlalchemy import text as _text
-    with engine.connect() as conn:
-        for ddl in [
-            "ALTER TABLE merchants ADD COLUMN IF NOT EXISTS api_key TEXT",
-            "ALTER TABLE policies ADD COLUMN IF NOT EXISTS version INT DEFAULT 1",
-            "ALTER TABLE policies ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP",
-            "ALTER TABLE checkouts ADD COLUMN IF NOT EXISTS policy_version INT DEFAULT 1",
-            "ALTER TABLE approvals ADD COLUMN IF NOT EXISTS decided_at TIMESTAMP",
-            "ALTER TABLE policies ADD COLUMN IF NOT EXISTS auto_approve_limit INT DEFAULT 500000",
-            "ALTER TABLE policies ADD COLUMN IF NOT EXISTS approval_limit INT DEFAULT 1000000",
-            "ALTER TABLE policies ADD COLUMN IF NOT EXISTS hard_block_limit INT DEFAULT 2000000",
-            "ALTER TABLE policies ADD COLUMN IF NOT EXISTS max_campaign_budget INT DEFAULT 1000000",
-            "ALTER TABLE policies ADD COLUMN IF NOT EXISTS max_daily_spend INT DEFAULT 5000000",
-            "ALTER TABLE policies ADD COLUMN IF NOT EXISTS min_margin_pct INT DEFAULT 10",
-            "ALTER TABLE products ADD COLUMN IF NOT EXISTS reserved INT DEFAULT 0",
+    # check existence on a throwaway connection
+    try:
+        with engine.connect() as conn:
+            try:
+                cols = [r[1] for r in conn.execute(_text(f"PRAGMA table_info({table})")).fetchall()]
+            except Exception:
+                cols = []
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            if cols and column in cols:
+                return
+            if not cols:
+                # non-sqlite backend: check information_schema
+                try:
+                    hit = conn.execute(_text(
+                        "SELECT 1 FROM information_schema.columns WHERE table_name=:t AND column_name=:c"),
+                        {"t": table, "c": column}).first()
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                    if hit:
+                        return
+                except Exception:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+    except Exception as e:
+        print(f"migrate warn {table}.{column}: {e}")
+        return
+    # add on a fresh transaction; each attempt isolated
+    for stmt in (f'ALTER TABLE {table} ADD COLUMN "{column}" {ddl_type}',
+                 f'ALTER TABLE {table} ADD COLUMN IF NOT EXISTS "{column}" {ddl_type}'):
+        try:
+            with engine.begin() as conn:
+                conn.execute(_text(stmt))
+            return
+        except Exception as e:
+            msg = str(e).lower()
+            if "duplicate column" in msg or "already exists" in msg:
+                return
+            last = e
+    print(f"migrate skip {table}.{column}: {last}")
 
-        ]:
-            try: conn.execute(_text(ddl)); conn.commit()
-            except Exception as e: print(f"migrate skip {ddl[:30]}: {e}")
+for _t, _c, _d in [
+    ("merchants", "api_key", "TEXT"),
+    ("merchants", "api_key_hash", "TEXT"),
+    ("merchants", "api_key_prefix", "TEXT"),
+    ("policies", "version", "INT DEFAULT 1"),
+    ("policies", "updated_at", "TIMESTAMP"),
+    ("checkouts", "policy_version", "INT DEFAULT 1"),
+    ("approvals", "decided_at", "TIMESTAMP"),
+    ("approvals", "campaign_id", "TEXT"),
+    ("approvals", "action_type", "TEXT"),
+    ("approvals", "expires_at", "TIMESTAMP"),
+    ("policies", "auto_approve_limit", "INT DEFAULT 500000"),
+    ("policies", "approval_limit", "INT DEFAULT 1000000"),
+    ("policies", "hard_block_limit", "INT DEFAULT 2000000"),
+    ("policies", "max_campaign_budget", "INT DEFAULT 1000000"),
+    ("policies", "max_daily_spend", "INT DEFAULT 5000000"),
+    ("policies", "min_margin_pct", "INT DEFAULT 10"),
+    ("products", "reserved", "INT DEFAULT 0"),
+    ("orders", "campaign_id", "TEXT"),
+    ("webhook_events", "status", "TEXT DEFAULT 'received'"),
+    ("webhook_events", "attempts", "INT DEFAULT 0"),
+    ("webhook_events", "last_error", "TEXT DEFAULT ''"),
+    ("campaigns", "expected_incremental_margin", "INT DEFAULT 0"),
+    ("campaigns", "budget_paise", "INT DEFAULT 0"),
+    ("campaigns", "cost_paise", "INT DEFAULT 0"),
+    ("campaigns", "policy_version", "INT DEFAULT 1"),
+    ("campaigns", "experiment_ratio", "FLOAT DEFAULT 0.1"),
+    ("campaigns", "simulation_mode", "BOOLEAN DEFAULT TRUE"),
+    ("campaigns", "approved_amount", "INT"),
+    ("campaigns", "action_hash", "TEXT"),
+    ("campaign_audiences", "customer_id", "TEXT"),
+    ("campaign_audiences", "group", "TEXT"),
+    ("campaign_audiences", "assigned_at", "TIMESTAMP"),
+    ("campaign_audiences", "exposed_at", "TIMESTAMP"),
+    ("campaign_audiences", "viewed_at", "TIMESTAMP"),
+    ("campaign_audiences", "clicked_at", "TIMESTAMP"),
+    ("campaign_audiences", "added_at", "TIMESTAMP"),
+    ("campaign_audiences", "purchased_at", "TIMESTAMP"),
+    ("campaign_audiences", "order_id", "TEXT"),
+    ("campaign_audiences", "is_simulated", "BOOLEAN DEFAULT FALSE"),
+    ("campaign_metrics", "treatment_eligible", "INT DEFAULT 0"),
+    ("campaign_metrics", "treatment_purchases", "INT DEFAULT 0"),
+    ("campaign_metrics", "treatment_revenue", "INT DEFAULT 0"),
+    ("campaign_metrics", "treatment_margin", "INT DEFAULT 0"),
+    ("campaign_metrics", "control_eligible", "INT DEFAULT 0"),
+    ("campaign_metrics", "control_purchases", "INT DEFAULT 0"),
+    ("campaign_metrics", "control_revenue", "INT DEFAULT 0"),
+    ("campaign_metrics", "control_margin", "INT DEFAULT 0"),
+    ("campaign_metrics", "incremental_orders", "INT DEFAULT 0"),
+    ("campaign_metrics", "incremental_revenue", "INT DEFAULT 0"),
+    ("campaign_metrics", "incremental_margin", "INT DEFAULT 0"),
+    ("campaign_metrics", "ci_low", "FLOAT"),
+    ("campaign_metrics", "ci_high", "FLOAT"),
+    ("campaign_metrics", "sample_adequate", "BOOLEAN DEFAULT FALSE"),
+    ("campaign_metrics", "simulation_mode", "BOOLEAN DEFAULT TRUE"),
+]:
+    _ensure_column(_t, _c, _d)
+try:
+    from .models.entities import LearningState  # noqa: F401 - ensure table via create_all below
+    Base.metadata.create_all(bind=engine)
 except Exception as e:
-    print(f"migrate warn: {e}")
+    print(f"learning_state create warn: {e}")
 
 # seed on startup if empty
 def seed():
     db = SessionLocal()
     try:
+        from .models.entities import hash_api_key
         if db.query(Merchant).count()==0:
             m = Merchant(id="m_demo", name="Demo Merchant", email="merchant@demo.local")
+            # demo key: stored as hash; raw value only in backend/.env for local dev
+            import os
+            raw = os.getenv("DEMO_MERCHANT_KEY", "demo_key_123")
+            m.api_key = None  # no plaintext at rest
+            m.api_key_hash = hash_api_key(raw)
+            m.api_key_prefix = raw[:6]
             db.add(m); db.commit()
             c = Customer(id="cust_demo", merchant_id="m_demo", name="Demo Customer", email="demo@customer.local")
             db.add(c)

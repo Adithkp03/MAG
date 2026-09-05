@@ -28,6 +28,9 @@ def get_engine():
 try:
     engine = get_engine()
 except Exception as e:
+    if settings.env == "production":
+        # fail fast in production: never silently serve on the wrong database
+        raise
     # still allow app to start so health can report, but DB ops will fail
     print(f"DB init failed: {e}")
     from sqlalchemy import create_engine as ce

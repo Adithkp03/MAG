@@ -15,7 +15,9 @@ def publish_pending(db: Session):
     published=0
     for e in pending:
         try:
-            redis_publish(e.event_type, e.payload)
+            payload=dict(e.payload or {})
+            payload["_outbox_id"]=e.id  # consumer-side dedup key
+            redis_publish(e.event_type, payload)
             e.status="published"; e.published_at=datetime.datetime.utcnow()
             published+=1
         except Exception:
