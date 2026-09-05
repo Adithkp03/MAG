@@ -20,8 +20,9 @@ def _get_redis():
         return None
     try:
         import redis
-        _redis = redis.from_url(url, decode_responses=True, socket_connect_timeout=3, socket_timeout=3)
-        _redis.ping()
+        client = redis.from_url(url, decode_responses=True, socket_connect_timeout=3, socket_timeout=3)
+        client.ping()
+        _redis = client
         return _redis
     except Exception as e:
         print(f"redis unavailable, fallback to memory: {e}")

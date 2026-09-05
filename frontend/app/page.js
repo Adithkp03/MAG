@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 const MERCHANT_KEY = process.env.NEXT_PUBLIC_MERCHANT_KEY || "demo_key_123";
 function authHeaders(extra={}){ return {"X-Merchant-Id":"m_demo","X-API-Key":MERCHANT_KEY,"Content-Type":"application/json",...extra}; }
@@ -44,9 +45,14 @@ export default function Page(){
       <h1 className="text-2xl font-black tracking-tight text-gray-900">MAG GROWTH CONTROL CENTER</h1>
       <div className="text-sm font-medium text-gray-500 mt-1">Autonomous Growth v{version} — {health ? health.status : "Connecting..."}</div>
      </div>
-     <button onClick={runMAG} disabled={running} className="bg-black hover:bg-gray-800 text-white transition-colors duration-200 px-6 py-3 rounded-xl font-bold text-sm shadow-sm flex items-center gap-2">
-      {running ? "Running Analysis…" : "▶ Run MAG Analysis"}
-     </button>
+     <div className="flex gap-4">
+       <Link href="/shop" className="bg-white border border-gray-200 hover:bg-gray-50 text-black transition-colors duration-200 px-6 py-3 rounded-xl font-bold text-sm shadow-sm flex items-center gap-2">
+        Open Customer Shop →
+       </Link>
+       <button onClick={runMAG} disabled={running} className="bg-black hover:bg-gray-800 text-white transition-colors duration-200 px-6 py-3 rounded-xl font-bold text-sm shadow-sm flex items-center gap-2">
+        {running ? "Running Analysis…" : "▶ Run MAG Analysis"}
+       </button>
+     </div>
     </div>
 
     {warnings.length > 0 && <div className="bg-red-50 text-red-700 border border-red-100 px-4 py-3 rounded-xl text-sm font-medium shadow-sm">Warnings: {warnings.join(", ")}</div>}
@@ -181,14 +187,15 @@ export default function Page(){
      ) : (
       <div className="space-y-3">
        {campaigns.slice(0,5).map(c=>(
-        <div key={"wrap-"+(c.id||c.campaign_id)}><div onClick={()=>openCampaign(c.id||c.campaign_id)} className="cursor-pointer">
-        <div key={c.id||c.campaign_id} className="flex justify-between items-center p-3 bg-gray-50 rounded-xl border border-gray-100">
-         <div className="font-semibold text-sm text-gray-900">{c.name||c.id}</div>
-         <div className="flex items-center gap-3">
-          {c.discount && <span className="bg-green-100 text-green-700 font-bold px-2 py-0.5 rounded text-xs">{c.discount}% OFF</span>}
-          <span className="text-xs font-bold uppercase tracking-wider text-gray-500">{c.status}</span>
+        <div key={"wrap-"+(c.id||c.campaign_id)} onClick={()=>openCampaign(c.id||c.campaign_id)} className="cursor-pointer">
+         <div className="flex justify-between items-center p-3 bg-gray-50 rounded-xl border border-gray-100">
+          <div className="font-semibold text-sm text-gray-900">{c.name||c.id}</div>
+          <div className="flex items-center gap-3">
+           {c.discount && <span className="bg-green-100 text-green-700 font-bold px-2 py-0.5 rounded text-xs">{c.discount}% OFF</span>}
+           <span className="text-xs font-bold uppercase tracking-wider text-gray-500">{c.status}</span>
+          </div>
          </div>
-        </div></div>
+        </div>
        ))}
       </div>
      )}

@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .core.database import Base, engine, SessionLocal
 from .models.entities import Merchant, Customer, Product, Policy
-from .api.routes import products, carts, checkout, orders, trust, webhooks, agent, payments, recommendations, ucp, growth, growth_agent, campaigns, evaluation, workers, autonomous, hardening
+from .api.routes import products, carts, checkout, orders, trust, webhooks, agent, payments, recommendations, ucp, growth, growth_agent, campaigns, evaluation, workers, autonomous, hardening, shop
 import logging, time
 from .core.config import settings
 
@@ -204,6 +204,7 @@ for _t, _c, _d in [
     ("policies", "max_campaign_budget", "INT DEFAULT 1000000"),
     ("policies", "max_daily_spend", "INT DEFAULT 5000000"),
     ("policies", "min_margin_pct", "INT DEFAULT 10"),
+    ("products", "cost_price", "INT"),
     ("products", "reserved", "INT DEFAULT 0"),
     ("orders", "campaign_id", "TEXT"),
     ("webhook_events", "status", "TEXT DEFAULT 'received'"),
@@ -273,6 +274,8 @@ def seed():
                 {"id":"prod_headset1","merchant_id":"m_demo","name":"Wireless Headset","description":"Noise cancelling wireless headset","price":349900,"cost_price":209940,"category":"headset","stock":30},
                 {"id":"prod_mousepad1","merchant_id":"m_demo","name":"XL Mousepad","description":"900x400 mousepad","price":49900,"cost_price":19960,"category":"mousepad","stock":100},
                 {"id":"prod_bag1","merchant_id":"m_demo","name":"Laptop Bag 15in","description":"Water resistant laptop bag","price":149900,"cost_price":89940,"category":"bag","stock":25},
+                {"id":"prod_shoes1","merchant_id":"m_demo","name":"Running Shoes Pro","description":"Lightweight running shoes, breathable mesh upper","price":449900,"cost_price":269940,"category":"shoes","stock":15},
+                {"id":"prod_charger1","merchant_id":"m_demo","name":"Wireless Charger Pad","description":"15W fast wireless charger, Qi compatible","price":199900,"cost_price":99950,"category":"charger","stock":50},
             ]
             for p in products_seed:
                 db.add(Product(**p))
@@ -300,6 +303,7 @@ app.include_router(workers.router, prefix="/api/v1")
 app.include_router(autonomous.router)
 app.include_router(hardening.router)
 app.include_router(evaluation.router, prefix="/api/v1")
+app.include_router(shop.router, prefix="/api/v1")
 
 @app.get("/health")
 def health():
