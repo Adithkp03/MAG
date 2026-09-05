@@ -76,8 +76,16 @@ export default function ShopPage() {
       });
       const data = await res.json();
       setAiResponse(data.reply);
+      
+      let newProducts = [];
       if (data.products && data.products.length > 0) {
-        setProducts(data.products.map(p => ({
+        newProducts = data.products;
+      } else if (data.tool_call && data.tool_call.name === "search_products" && Array.isArray(data.tool_call.result)) {
+        newProducts = data.tool_call.result;
+      }
+
+      if (newProducts.length > 0) {
+        setProducts(newProducts.map(p => ({
           ...p,
           price_inr: p.price / 100
         })));

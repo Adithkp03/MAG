@@ -8,7 +8,7 @@ _stream_prefix = "mag:events"
 def _get_redis():
     global _redis
     if _redis is not None:
-        return _redis
+        return _redis if _redis is not False else None
     url = os.getenv("REDIS_URL") or os.getenv("UPSTASH_REDIS_URL") or ""
     if not url:
         # try config
@@ -26,6 +26,7 @@ def _get_redis():
         return _redis
     except Exception as e:
         print(f"redis unavailable, fallback to memory: {e}")
+        _redis = False
         return None
 
 # fallback memory store with stream-like structure

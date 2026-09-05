@@ -93,7 +93,7 @@ def check_campaign_policy(db: Session, merchant_id: str, discount: int, budget: 
             return _result("escalated", f"Budget {budget/100:.0f} exceeds max {max_budget/100:.0f} — requires approval", 0.7, True, pol, violated="max_campaign_budget")
         return _result("blocked", f"Budget {budget/100:.0f} exceeds hard cap {max_budget*2/100:.0f}", 0.9, False, pol, violated="max_campaign_budget")
     if expected_margin_pct is not None and expected_margin_pct < min_margin:
-        return _result("blocked", f"Expected margin {expected_margin_pct:.1f}% below minimum {min_margin}%", 0.75, False, pol, violated="min_margin_pct")
+        return _result("escalated", f"Expected margin {expected_margin_pct:.1f}% below minimum {min_margin}%", 0.75, True, pol, violated="min_margin_pct")
     # risk tolerance gates high discount / high budget combos
     if risk_tol == "low" and ((discount or 0) >= 10 or (budget and budget > max_budget * 0.5)):
         return _result("escalated", "Low risk tolerance: human approval required for this spend/discount", 0.6, True, pol, violated="risk_tolerance")

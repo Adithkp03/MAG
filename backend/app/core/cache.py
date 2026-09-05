@@ -16,13 +16,19 @@ def _mem_get(key):
 def _mem_set(key, val, ttl):
     _cache[key] = {"val": val, "exp": time.time()+ttl}
 
+_redis_client = None
 def _redis():
+    global _redis_client
+    if _redis_client is not None:
+        return _redis_client if _redis_client is not False else None
     try:
         import redis
         r = redis.from_url(settings.redis_url, socket_connect_timeout=1, socket_timeout=1, decode_responses=True)
         r.ping()
+        _redis_client = r
         return r
     except Exception:
+        _redis_client = False
         return None
 
 def cache_get(key: str):

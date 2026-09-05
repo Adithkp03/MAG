@@ -305,8 +305,10 @@ app.include_router(hardening.router)
 app.include_router(evaluation.router, prefix="/api/v1")
 app.include_router(shop.router, prefix="/api/v1")
 
+_redis_health_client = None
 @app.get("/health")
 def health():
+    global _redis_health_client
     from .core.config import settings
     from .services.razorpay_adapter import has_keys
     # deep checks: db + redis
@@ -323,11 +325,19 @@ def health():
         db_ok = False
         logger.warning(f"health db check failed: {e}")
     try:
-        import redis as _redis
-        r = _redis.from_url(settings.redis_url, socket_connect_timeout=1, socket_timeout=1)
-        r.ping()
-        redis_ok = True
+        if _redis_health_client is not False:
+            if _redis_health_client is None:
+                import redis as _redis
+                r = _redis.from_url(settings.redis_url, socket_connect_timeout=1, socket_timeout=1)
+                r.ping()
+                _redis_health_client = r
+            else:
+                _redis_health_client.ping()
+            redis_ok = True
+        else:
+            redis_ok = False
     except Exception:
+        _redis_health_client = False
         redis_ok = False if "redis" in settings.redis_url else None
     return {"status":"ok" if db_ok else "degraded", "phase":"2 razorpay", "version": app.version, "env": settings.env, "groq": "configured" if settings.groq_api_key and "xxx" not in settings.groq_api_key else "missing - set GROQ_API_KEY", "razorpay": "live" if has_keys() else "mock (set RAZORPAY_KEY_ID)", "webhook": "/api/v1/webhooks/razorpay", "db": settings.database_url.split("@")[-1][:40], "db_ok": db_ok, "db_latency_ms": db_latency_ms, "redis_ok": redis_ok, "cache_ttl": settings.cache_ttl_seconds, "migrations": "alembic upgrade head", "tracing": "agent_execution_tracing (set OTEL_EXPORTER_OTLP_ENDPOINT for OTel)", "cors": cors_origins}
 

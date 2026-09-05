@@ -274,6 +274,10 @@ def detect_opportunities(db: Session, merchant_id: str="m_demo"):
         db.add(opp); db.flush()
         return opp
 
+    # 0. Demo High Risk
+    add_opp("inventory_liquidation", {"unsold_days": 180, "current_stock": 50, "loss_projected": 85000}, {"segment": "bargain_hunters", "count": 200}, "prod_laptop1", "flash sale 40% loss leader", 1500000, -250000, 0.9, "high", 0.95)
+
+
     # 1. Cross-sell gap
     for m in [x for x in prod_intel if x["attach_rate"]<0.5]:
         # find best attach target

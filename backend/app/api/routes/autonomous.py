@@ -98,6 +98,8 @@ def plan(opp_id: str, db: Session=Depends(get_db), merchant_id: str=Depends(requ
         raise HTTPException(status_code=403, detail={"code":"cross_tenant","message":"opportunity belongs to another merchant"})
     res=plan_action(db, opp_id)
     if not res: raise HTTPException(status_code=404, detail="opportunity not found")
+    if res.get("blocked"):
+        return {"opportunity_id": res["opportunity"].id, "blocked": True, "policy": res["policy"], "next": res["next"]}
     opp=res["opportunity"]; camp=res["campaign"]
     return {"opportunity_id": opp.id, "type": opp.type, "campaign_id": camp.id, "campaign_status": camp.status, "audience_count": res["audience_count"], "offer": res["offer"], "budget_inr": res["budget_inr"], "economics": res["economics"], "policy": res["policy"], "next": res["next"]}
 
