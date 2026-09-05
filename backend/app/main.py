@@ -123,38 +123,51 @@ try:
 except Exception as e:
     print(f"index creation warn: {e}")
 # migrate missing columns for existing DBs (additive only, sqlite + postgres compatible)
-def _ensure_column(table: str, column: str, ddl_type: str):
-    from sqlalchemy import text as _text
-    # check existence on a throwaway connection
+# One bulk existence check per boot (not 50 sequential round-trips).
+_SCHEMA_COLS: set[tuple[str, str]] | None = None
+
+def _schema_cols() -> set[tuple[str, str]]:
+    global _SCHEMA_COLS
+    if _SCHEMA_COLS is not None:
+        return _SCHEMA_COLS
+    found: set[tuple[str, str]] = set()
     try:
         with engine.connect() as conn:
+            from sqlalchemy import text as _text
             try:
-                cols = [r[1] for r in conn.execute(_text(f"PRAGMA table_info({table})")).fetchall()]
+                tables = [r[0] for r in conn.execute(_text(
+                    "SELECT name FROM sqlite_master WHERE type='table'")).fetchall()]
+                for t in tables:
+                    try:
+                        for r in conn.execute(_text(f"PRAGMA table_info({t})")).fetchall():
+                            found.add((t, r[1]))
+                    except Exception:
+                        pass
+                conn.rollback()
             except Exception:
-                cols = []
                 try:
                     conn.rollback()
                 except Exception:
                     pass
-            if cols and column in cols:
-                return
-            if not cols:
-                # non-sqlite backend: check information_schema
+                rows = conn.execute(_text(
+                    "SELECT table_name, column_name FROM information_schema.columns")).fetchall()
+                for t, c in rows:
+                    found.add((t, c))
                 try:
-                    hit = conn.execute(_text(
-                        "SELECT 1 FROM information_schema.columns WHERE table_name=:t AND column_name=:c"),
-                        {"t": table, "c": column}).first()
-                    try:
-                        conn.rollback()
-                    except Exception:
-                        pass
-                    if hit:
-                        return
+                    conn.rollback()
                 except Exception:
-                    try:
-                        conn.rollback()
-                    except Exception:
-                        pass
+                    pass
+    except Exception as e:
+        print(f"migrate warn schema scan: {e}")
+    _SCHEMA_COLS = found
+    return found
+
+
+def _ensure_column(table: str, column: str, ddl_type: str):
+    from sqlalchemy import text as _text
+    try:
+        if (table, column) in _schema_cols():
+            return
     except Exception as e:
         print(f"migrate warn {table}.{column}: {e}")
         return
@@ -164,10 +177,12 @@ def _ensure_column(table: str, column: str, ddl_type: str):
         try:
             with engine.begin() as conn:
                 conn.execute(_text(stmt))
+            _schema_cols().add((table, column))
             return
         except Exception as e:
             msg = str(e).lower()
             if "duplicate column" in msg or "already exists" in msg:
+                _schema_cols().add((table, column))
                 return
             last = e
     print(f"migrate skip {table}.{column}: {last}")

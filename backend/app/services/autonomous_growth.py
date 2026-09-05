@@ -150,7 +150,7 @@ def compute_customer_intelligence(db: Session, merchant_id: str="m_demo"):
         prof.clv=clv; prof.aov=aov; prof.frequency=freq; prof.recency_days=recency
         prof.category_affinity=top_cats; prof.price_sensitivity=price_sens; prof.churn_prob=round(churn,2)
         prof.predicted_next_category=pred_next; prof.value_segment=seg; prof.last_purchase_at=last
-        db.commit()
+        db.flush()
         out.append({"customer_id": cid, "rfm": rfm, "r": r_score, "f": f_score, "m": m_score, "clv": clv, "clv_inr": round(clv/100,2), "aov_inr": round(aov/100,2), "frequency": freq, "recency_days": recency, "churn_prob": round(churn,2), "segment": seg, "top_categories": top_cats, "predicted_next": pred_next, "price_sensitivity": price_sens})
     # also include customers with no orders (never purchased) — Phase 4 completeness
     try:
@@ -168,10 +168,11 @@ def compute_customer_intelligence(db: Session, merchant_id: str="m_demo"):
             prof.clv=0; prof.aov=0; prof.frequency=0; prof.recency_days=999
             prof.category_affinity=[]; prof.price_sensitivity="high"; prof.churn_prob=0.95
             prof.predicted_next_category=None; prof.value_segment="churned"; prof.last_purchase_at=None
-            db.commit()
+            db.flush()
             out.append({"customer_id": cid, "rfm": "111", "r": 1, "f": 1, "m": 1, "clv": 0, "clv_inr": 0, "aov_inr": 0, "frequency": 0, "recency_days": 999, "churn_prob": 0.95, "segment": "churned", "top_categories": [], "predicted_next": None, "price_sensitivity": "high"})
     except Exception as e:
-        pass
+        db.rollback()
+    db.commit()
     return out
 
 def compute_product_intelligence(db: Session, merchant_id: str="m_demo"):
@@ -233,7 +234,7 @@ def compute_product_intelligence(db: Session, merchant_id: str="m_demo"):
             db.add(prof)
         prof.sales_velocity=velocity; prof.revenue_contribution=contrib; prof.margin_pct=margin; prof.inventory_level=p["stock"]
         prof.days_of_inventory=doi; prof.attach_rate=attach; prof.conversion_rate=conv; prof.demand_trend=trend; prof.slow_moving_score=round(slow,2)
-        db.commit()
+        db.flush()
         # Phase 5: inventory_history snapshot (append daily, keep last 30)
         try:
             from ..models.entities import InventoryHistory
@@ -242,10 +243,12 @@ def compute_product_intelligence(db: Session, merchant_id: str="m_demo"):
             hist=db.query(InventoryHistory).filter(InventoryHistory.product_id==pid).order_by(InventoryHistory.recorded_at.desc()).all()
             if len(hist)>30:
                 for old in hist[30:]: db.delete(old)
-            db.commit()
+            db.flush()
         except Exception as e:
             db.rollback()
+            db.flush()
         out.append({"product_id": pid, "name": p["name"], "category": p["category"], "price": p["price"], "price_inr": round(p["price"]/100,2), "cost_price": cost, "cost_inr": round(cost/100,2) if cost else None, "stock": p["stock"], "velocity": velocity, "revenue_contribution": contrib, "margin_pct": margin, "doi": doi, "attach_rate": attach, "conversion": conv, "trend": trend, "slow_score": round(slow,2)})
+    db.commit()
     return out
 
 def detect_opportunities(db: Session, merchant_id: str="m_demo"):
