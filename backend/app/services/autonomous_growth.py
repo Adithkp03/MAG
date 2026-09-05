@@ -21,13 +21,13 @@ def ensure_merchant_objective(db: Session, merchant_id: str):
     return obj
 
 def _learned_or_cohort(db: Session, merchant_id: str, learn_key: str,
-                       opp_type: str, category: str | None = None,
-                       fallback: float = 0.08) -> dict:
+                       opp_type: str, category: str | None = None) -> dict:
     """LearningState posterior wins if it has real observations; else
     historical cohort estimate; else cold-start prior (explicitly labeled).
-    The `fallback` hardcoded rate is used ONLY to seed the prior mean for
-    cold-start and is always reported as source='prior'."""
-    from .conversion import cohort_conversion, PRIOR_MEAN
+    The prior mean comes from conversion.COLD_START_PRIORS — the single
+    labeled table of hardcoded rates — and is always reported as
+    source='prior', never as observed behavior."""
+    from .conversion import cohort_conversion, cold_start_prior
     try:
         from ..models.entities import LearningState
         ls = db.query(LearningState).filter(
@@ -52,7 +52,7 @@ def _learned_or_cohort(db: Session, merchant_id: str, learn_key: str,
     except Exception:
         pass
     return {
-        "predicted_conversion": round(fallback if fallback else PRIOR_MEAN, 4),
+        "predicted_conversion": round(cold_start_prior(opp_type), 4),
         "sample_size": 0,
         "confidence": 0.2,
         "source": "prior",
@@ -288,8 +288,7 @@ def detect_opportunities(db: Session, merchant_id: str="m_demo"):
             margin_estimated = not (rec_prod and rec_prod.get("cost_price"))
             eligible=int(order_count*0.3)
             est=_learned_or_cohort(db, merchant_id, f"cross_sell:{m['category']}",
-                                   "cross_sell", m["category"],
-                                   fallback=cand["affinity"]*0.4)
+                                   "cross_sell", m["category"])
             conv=est["predicted_conversion"]
             exp_rev=int(eligible * conv * rec_price)
             exp_margin=int(exp_rev * rec_margin * (1 - min(obj.max_discount,8)/100) - 5000)  # minus campaign cost
@@ -302,7 +301,7 @@ def detect_opportunities(db: Session, merchant_id: str="m_demo"):
         lap=next((p for p in prod_intel if p["category"]=="laptop"), None)
         if lap:
             eligible=len(high_val)
-            est_u=_learned_or_cohort(db, merchant_id, "upsell:laptop", "upsell", "laptop", fallback=0.12)
+            est_u=_learned_or_cohort(db, merchant_id, "upsell:laptop", "upsell", "laptop")
             conv=est_u["predicted_conversion"]; price=lap["price"]; margin=lap["margin_pct"]/100
             margin_estimated = lap.get("cost_price") is None
             exp_rev=int(eligible * conv * price)
@@ -315,7 +314,7 @@ def detect_opportunities(db: Session, merchant_id: str="m_demo"):
     if churned:
         # winback: avg order value from churned segment, eligible * conv * price * margin - discount - cost
         eligible=len(churned)
-        est_c=_learned_or_cohort(db, merchant_id, "churn_risk:global", "churn_risk", None, fallback=0.08)
+        est_c=_learned_or_cohort(db, merchant_id, "churn_risk:global", "churn_risk", None)
         conv=est_c["predicted_conversion"]; price=int(sum(c["aov_inr"] for c in churned)/len(churned)*100) if churned else 200000; margin=0.25
         exp_rev=int(eligible * conv * price)
         exp_margin=int(exp_rev * margin * 0.90 - 10000)  # 10% discount
@@ -326,7 +325,7 @@ def detect_opportunities(db: Session, merchant_id: str="m_demo"):
     repeat=[c for c in cust_intel if c["frequency"]==1 and 30<=c["recency_days"]<=60]
     if repeat:
         eligible=len(repeat)
-        est_r=_learned_or_cohort(db, merchant_id, "repeat_purchase:global", "repeat_purchase", None, fallback=0.10)
+        est_r=_learned_or_cohort(db, merchant_id, "repeat_purchase:global", "repeat_purchase", None)
         conv=est_r["predicted_conversion"]; price=int(sum(c["aov_inr"] for c in repeat)/len(repeat)*100) if repeat else 200000; margin=0.25
         exp_rev=int(eligible * conv * price)
         exp_margin=int(exp_rev * margin * 0.92 - 6000)
@@ -337,7 +336,7 @@ def detect_opportunities(db: Session, merchant_id: str="m_demo"):
     dead=[p for p in prod_intel if p["slow_score"]>0.6 and p["stock"]>20]
     for p in dead[:2]:
         eligible=p["stock"]
-        est_d=_learned_or_cohort(db, merchant_id, f"dead_stock:{p['category']}", "dead_stock", p["category"], fallback=0.15)
+        est_d=_learned_or_cohort(db, merchant_id, f"dead_stock:{p['category']}", "dead_stock", p["category"])
         conv=est_d["predicted_conversion"]; price=p["price"]; margin=p["margin_pct"]/100
         margin_estimated = p.get("cost_price") is None
         exp_rev=int(eligible * conv * price)
@@ -349,7 +348,7 @@ def detect_opportunities(db: Session, merchant_id: str="m_demo"):
     highm=[p for p in prod_intel if p["margin_pct"]>=30 and p["stock"]>20]
     for p in highm[:2]:
         eligible=int(order_count*0.2)
-        est_h=_learned_or_cohort(db, merchant_id, f"high_margin:{p['category']}", "high_margin", p["category"], fallback=0.10)
+        est_h=_learned_or_cohort(db, merchant_id, f"high_margin:{p['category']}", "high_margin", p["category"])
         conv=est_h["predicted_conversion"]; price=p["price"]; margin=p["margin_pct"]/100
         margin_estimated = p.get("cost_price") is None
         exp_rev=int(eligible * conv * price)
@@ -371,7 +370,7 @@ def detect_opportunities(db: Session, merchant_id: str="m_demo"):
     champ=[c for c in cust_intel if c["segment"]=="champion"]
     if champ:
         eligible=len(champ)
-        est_v=_learned_or_cohort(db, merchant_id, "high_value:global", "high_value", None, fallback=0.15)
+        est_v=_learned_or_cohort(db, merchant_id, "high_value:global", "high_value", None)
         conv=est_v["predicted_conversion"]; price=int(sum(c["clv_inr"] for c in champ)/len(champ)*100) if champ else 500000; margin=0.30
         exp_rev=int(eligible * conv * price)
         exp_margin=int(exp_rev * margin * 0.95 - 12000)
@@ -383,7 +382,7 @@ def detect_opportunities(db: Session, merchant_id: str="m_demo"):
     aband=[c for c in cust_intel if c["recency_days"]>60 and c["frequency"]==1]
     if aband:
         eligible=len(aband)
-        est_a=_learned_or_cohort(db, merchant_id, "abandoned_cart:global", "abandoned_cart", None, fallback=0.09)
+        est_a=_learned_or_cohort(db, merchant_id, "abandoned_cart:global", "abandoned_cart", None)
         conv=est_a["predicted_conversion"]; price=int(sum(c["aov_inr"] for c in aband)/len(aband)*100) if aband else 200000; margin=0.25
         exp_rev=int(eligible * conv * price)
         exp_margin=int(exp_rev * margin * 0.90 - 7000)
@@ -562,7 +561,9 @@ def record_outcome(db: Session, campaign_id: str, funnel: dict | None = None):
         c_margin = int(c_rev * margin_rate)
         exposed = sum(1 for r in t_rows if r.exposed_at is not None)
     else:
-        # legacy aggregate path (pre-experiment campaigns): keep working but flag
+        # legacy aggregate path (pre-experiment campaigns only): control rate
+        # is derived from the merchant's own order history, never a fixed 2%.
+        from .conversion import cohort_conversion
         funnel = funnel or {}
         eligible = int(funnel.get("eligible", funnel.get("exposed", 0) * 1.1 if funnel.get("exposed") else 100))
         t_elig = int(eligible * 0.9)
@@ -570,7 +571,11 @@ def record_outcome(db: Session, campaign_id: str, funnel: dict | None = None):
         exposed = int(funnel.get("exposed", t_elig))
         t_purch = int(funnel.get("purchased", funnel.get("conversions", 0)))
         t_rev = int(funnel.get("revenue_paise", funnel.get("revenue", 0)))
-        c_rate = 0.02
+        try:
+            c_rate = cohort_conversion(db, camp.merchant_id, "cross_sell",
+                                       camp.target_category)["predicted_conversion"]
+        except Exception:
+            c_rate = 0.02
         c_purch = int(c_elig * c_rate)
         c_rev = int(c_purch * (t_rev / max(t_purch, 1) if t_purch else 50000))
         t_margin = int(t_rev * 0.25)

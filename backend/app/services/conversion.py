@@ -3,9 +3,10 @@
 Historical data -> relevant cohort -> observed conversion -> smoothed
 posterior -> confidence/sample size -> expected outcome.
 
-Sources: HISTORICAL (n>=50) | SMOOTHED (10<=n<50) | COLD_START prior (n<10).
-Never hides a hardcoded assumption: cold-start returns source='prior'
-with the prior value exposed.
+Sources: HISTORICAL (n>=50) | SMOOTHED (10<=n<50) | COLD-START prior (n<10).
+Cold-start priors below are the ONLY hardcoded rates in the system, used
+solely as prior means and always reported as source='prior' — never
+presented as observed behavior.
 """
 import math
 
@@ -14,6 +15,25 @@ PRIOR_MEAN = 0.08
 PRIOR_WEIGHT = 20
 MIN_HISTORICAL_N = 50
 MIN_SMOOTHED_N = 10
+
+# Per-opportunity cold-start prior means, used ONLY when no cohort history
+# and no learned posterior exists. Every use is labeled source='prior'.
+COLD_START_PRIORS = {
+    "cross_sell": 0.08,
+    "upsell": 0.12,
+    "churn_risk": 0.08,
+    "repeat_purchase": 0.10,
+    "dead_stock": 0.15,
+    "high_margin": 0.10,
+    "high_value": 0.15,
+    "abandoned_cart": 0.09,
+    "low_margin": 0.05,
+    "stock_risk": 0.05,
+}
+
+
+def cold_start_prior(opportunity_type: str) -> float:
+    return COLD_START_PRIORS.get(opportunity_type, PRIOR_MEAN)
 
 
 def estimate(observed_successes: int, observed_trials: int,

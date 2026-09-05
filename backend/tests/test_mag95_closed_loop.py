@@ -206,7 +206,7 @@ def test_EFGH_full_loop_approval_execution_measurement_learning():
     assert camp.budget_paise <= 1000000, "budget exceeds cap"
 
     before = _learned_or_cohort(db, "m_eval1", "cross_sell:shoes",
-                                "cross_sell", "shoes", fallback=0.08)
+                                "cross_sell", "shoes")
 
     # F: escalated campaigns need approval; unauthorized exec blocked
     if planned["policy"]["decision"] == "requires_approval":
@@ -267,7 +267,7 @@ def test_EFGH_full_loop_approval_execution_measurement_learning():
     assert {"previous_estimate", "observed_conversion",
             "updated_estimate", "sample_size"}.issubset(u), u
     after = _learned_or_cohort(db, "m_eval1", u["key"], "cross_sell",
-                               "shoes", fallback=0.08)
+                               "shoes")
     assert after["sample_size"] >= before["sample_size"], (before, after)
     _score("EFGH_loop_learning", 40, True)
     db.close()

@@ -277,10 +277,10 @@ def _t_lift():
 def _t_learn():
     from app.services.autonomous_growth import learning_update, _learned_or_cohort
     db = CTX["db"]
-    before = _learned_or_cohort(db, "m_eval1", "cross_sell:shoes", "cross_sell", "shoes", fallback=0.08)
+    before = _learned_or_cohort(db, "m_eval1", "cross_sell:shoes", "cross_sell", "shoes")
     ups = learning_update(db, "m_eval1")
     assert ups, "no learning updates"
-    after = _learned_or_cohort(db, "m_eval1", ups[0]["key"], "cross_sell", "shoes", fallback=0.08)
+    after = _learned_or_cohort(db, "m_eval1", ups[0]["key"], "cross_sell", "shoes")
     assert after["sample_size"] >= before["sample_size"]
     return f"{before['predicted_conversion']} -> {after['predicted_conversion']} (n={after['sample_size']})"
 

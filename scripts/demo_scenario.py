@@ -49,7 +49,7 @@ def main():
     planned = plan_action(db, top.id)
     camp = planned["campaign"]
     print(f"4-5. POLICY: {planned['policy']['decision']} — {planned['policy'].get('reason')}")
-    before = _learned_or_cohort(db, "m_eval1", f"{top.type}:shoes", top.type, "shoes", fallback=0.08)
+    before = _learned_or_cohort(db, "m_eval1", f"{top.type}:shoes", top.type, "shoes")
     print(f"   LEARNED-BEFORE: {before}")
 
     if planned["policy"]["decision"] == "requires_approval":
